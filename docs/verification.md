@@ -37,6 +37,16 @@ gsettings get org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type
 systemctl is-enabled sleep.target suspend.target hibernate.target hybrid-sleep.target
 ```
 
+## Windows / VMware 桌面复制粘贴
+
+```bash
+dpkg-query -W open-vm-tools open-vm-tools-desktop
+systemctl is-active open-vm-tools
+pgrep -a -u "$USER" -x vmtoolsd | grep -- '-n vmusr'
+```
+
+在 VMware Workstation 中确认 `VM > Settings > Options > Guest Isolation` 已启用复制粘贴，然后分别测试 Windows 到 Ubuntu、Ubuntu 到 Windows。`vmware-user` 只在图形桌面会话中运行；如果刚安装完成，先注销并重新登录或重启。Wayland 下仍失败时，可在登录界面选择“Ubuntu on Xorg”后复验。
+
 ## SSH
 
 ```bash

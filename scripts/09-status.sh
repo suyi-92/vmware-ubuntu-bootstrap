@@ -57,6 +57,31 @@ for unit in open-vm-tools.service ssh.socket ssh.service sshd.service docker.ser
 done
 echo
 
+echo "=== VMware clipboard ==="
+for vmware_package in open-vm-tools open-vm-tools-desktop; do
+  if dpkg-query -W -f='${Status}\n' "$vmware_package" 2>/dev/null \
+    | grep -Fxq 'install ok installed'; then
+    printf '%-24s %s\n' "$vmware_package" "installed"
+  else
+    printf '%-24s %s\n' "$vmware_package" "missing"
+  fi
+done
+if [[ -r /etc/xdg/autostart/vmware-user.desktop ]]; then
+  echo "desktop autostart:       present"
+else
+  echo "desktop autostart:       missing"
+fi
+desktop_agent_status="not running (log in to the graphical desktop)"
+if command -v pgrep >/dev/null 2>&1; then
+  if pgrep -a -u "$REAL_UID" -x vmtoolsd 2>/dev/null \
+      | grep -Eq '[[:space:]]-n[[:space:]]+vmusr([[:space:]]|$)' \
+    || pgrep -u "$REAL_UID" -f '(^|/)(vmware-user|vmware-user-suid-wrapper)([[:space:]]|$)' >/dev/null; then
+    desktop_agent_status="running"
+  fi
+fi
+echo "desktop agent:           $desktop_agent_status"
+echo
+
 echo "=== Power ==="
 for target in sleep.target suspend.target hibernate.target hybrid-sleep.target; do
   printf '%-24s %s\n' "$target" "$(systemctl is-enabled "$target" 2>/dev/null || true)"

@@ -32,6 +32,20 @@ fi
 run_logged "APT 更新索引" env DEBIAN_FRONTEND=noninteractive apt-get update
 run_logged "安装常用软件包" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PACKAGES[@]}"
 
+if is_dry_run; then
+  info "DRY-RUN: verify open-vm-tools desktop clipboard integration"
+else
+  for vmware_package in open-vm-tools open-vm-tools-desktop; do
+    dpkg-query -W -f='${Status}\n' "$vmware_package" 2>/dev/null \
+      | grep -Fxq 'install ok installed' \
+      || die "VMware 集成包安装失败：$vmware_package"
+  done
+  command -v vmware-user-suid-wrapper >/dev/null 2>&1 \
+    || die "open-vm-tools-desktop 已安装，但缺少 vmware-user-suid-wrapper。"
+  [[ -r /etc/xdg/autostart/vmware-user.desktop ]] \
+    || warn "未找到 VMware 桌面代理自动启动项；主机与虚拟机复制粘贴可能不可用。"
+fi
+
 if [[ -n "$HOSTNAME" && "$HOSTNAME" != "$(hostname)" ]]; then
   backup_path /etc/hostname
   backup_path /etc/hosts

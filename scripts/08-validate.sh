@@ -22,6 +22,22 @@ source "$OS_RELEASE_FILE"
 [[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] || die "系统版本验收失败。"
 
 systemctl is-active --quiet open-vm-tools || die "open-vm-tools 未运行。"
+for vmware_package in open-vm-tools open-vm-tools-desktop; do
+  dpkg-query -W -f='${Status}\n' "$vmware_package" 2>/dev/null \
+    | grep -Fxq 'install ok installed' \
+    || die "VMware 集成包未安装：$vmware_package"
+done
+command -v vmware-user-suid-wrapper >/dev/null 2>&1 \
+  || die "VMware 桌面代理入口不存在。"
+[[ -r /etc/xdg/autostart/vmware-user.desktop ]] \
+  || die "VMware 桌面代理自动启动项不存在。"
+if command -v pgrep >/dev/null 2>&1; then
+  if ! pgrep -a -u "$REAL_UID" -x vmtoolsd 2>/dev/null \
+      | grep -Eq '[[:space:]]-n[[:space:]]+vmusr([[:space:]]|$)' \
+    && ! pgrep -u "$REAL_UID" -f '(^|/)(vmware-user|vmware-user-suid-wrapper)([[:space:]]|$)' >/dev/null; then
+    warn "VMware 桌面代理尚未在图形会话中运行；请登录 Ubuntu 桌面或重启后复验复制粘贴。"
+  fi
+fi
 systemctl is-active --quiet ssh.socket 2>/dev/null \
   || systemctl is-active --quiet ssh 2>/dev/null \
   || systemctl is-active --quiet sshd 2>/dev/null \

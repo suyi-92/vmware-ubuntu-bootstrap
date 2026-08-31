@@ -96,7 +96,10 @@ CPU：4 核或以上
 硬盘：80 GB 或以上
 Network Adapter：Bridged
 USB Controller：按实际设备需要
+Options > Guest Isolation：启用复制粘贴；需要拖放时同时启用拖放
 ```
+
+Windows 与 Ubuntu 桌面的复制粘贴由虚拟机内的 `open-vm-tools-desktop` 和图形会话中的 `vmware-user` 共同提供。脚本会安装并验收虚拟机内组件，但不能代替用户修改 VMware Workstation 的宿主机设置。
 
 Ubuntu 安装完成后，先在控制台确认：
 
@@ -330,7 +333,9 @@ vim nano tmux htop tree ripgrep fd-find git-lfs bash-completion shellcheck ufw
 
 - 使用 `DEBIAN_FRONTEND=noninteractive`。
 - 默认只执行 `apt-get update` 和安装缺失包，不自动进行发行版升级。
-- 成功后启用并验证 `open-vm-tools`、SSH 和时间同步。
+- 成功后启用并验证 `open-vm-tools`、`open-vm-tools-desktop`、桌面代理自动启动项、SSH 和时间同步。
+- `vmware-user` 在图形桌面登录后启动；首次安装后需要注销并重新登录，或完成脚本要求的重启。
+- 如果 VMware 已允许复制粘贴且组件均正常，但 Ubuntu Wayland 会话仍无法交互，可在登录界面切换到“Ubuntu on Xorg”后复验；脚本不自动改变桌面会话类型。
 - 包安装失败时只显示相关日志尾部，完整日志保存在受保护目录。
 
 ### 8.4 `static-network`
@@ -445,7 +450,7 @@ refresh_interval_ms = 0
 | 类别 | 必须验证的结果 |
 | --- | --- |
 | OS | Ubuntu 24.04、时间同步、磁盘空间正常 |
-| VMware | `open-vm-tools` active |
+| VMware | `open-vm-tools` active、桌面集成包和自动启动项存在；登录图形桌面后 `vmware-user` 正在运行 |
 | 网络 | 固定地址、默认路由、DNS、重启后仍生效 |
 | 代理 | 普通 `curl`、`sudo curl`、用户 Git、root Git、APT 均成功 |
 | Docker | 仅在已安装时验证 daemon/client 代理和一次拉取 |

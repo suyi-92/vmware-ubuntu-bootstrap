@@ -35,6 +35,8 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
 
 脚本会从 `/dev/tty` 逐项询问配置，API key 不回显。固定 IP 切换必须在 VMware 控制台确认 `netplan try`，否则 120 秒后自动回滚。
 
+安装会包含 `open-vm-tools` 和 `open-vm-tools-desktop`。首次重启并登录 Ubuntu 图形桌面后，确认 VMware Workstation 的 `VM > Settings > Options > Guest Isolation` 已允许复制粘贴；该宿主机设置不能由虚拟机内脚本修改。
+
 ## 3. 分阶段运行
 
 ```bash
