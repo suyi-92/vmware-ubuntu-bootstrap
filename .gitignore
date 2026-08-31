@@ -1,0 +1,13 @@
+config.env
+config.local.env
+.env
+secrets/
+*.key
+*.token
+*.log
+backups/
+state/
+artifacts/local/
+__pycache__/
+*.py[cod]
+.pytest_cache/

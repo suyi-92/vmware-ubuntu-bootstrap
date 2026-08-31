@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=00-lib.sh
+source "$SCRIPT_DIR/00-lib.sh"
+
+require_root
+load_config false
+resolve_real_user
+
+echo "=== VMware Ubuntu Bootstrap ==="
+echo "project: $VUB_PROJECT_DIR"
+echo "user:    $REAL_USER"
+echo
+
+echo "=== Phase states ==="
+if [[ -d "$VUB_STATE_DIR" ]]; then
+  shopt -s nullglob
+  states=("$VUB_STATE_DIR"/*.state)
+  if (( ${#states[@]} == 0 )); then
+    echo "(none)"
+  else
+    for state in "${states[@]}"; do
+      phase="$(basename "$state" .state)"
+      status="$(sed -nE 's/^status=(.*)$/\1/p' "$state" | head -n1)"
+      printf '%-20s %s\n' "$phase" "${status:-unknown}"
+    done
+  fi
+  shopt -u nullglob
+else
+  echo "(none)"
+fi
+echo
+
+echo "=== Network ==="
+iface="${NETWORK_INTERFACE:-$(current_interface)}"
+echo "interface: ${iface:-unknown}"
+echo "IPv4:     $(current_ipv4 "$iface" 2>/dev/null || echo unknown)"
+echo "gateway:  $(current_gateway 2>/dev/null || echo unknown)"
+echo
+
+echo "=== Proxy ==="
+if load_proxy_state; then
+  echo "proxy:    ${http_proxy:-未配置}"
+  echo "no_proxy: ${no_proxy:-未配置}"
+else
+  echo "(not managed)"
+fi
+echo
+
+echo "=== Services ==="
+for unit in open-vm-tools.service ssh.socket ssh.service sshd.service docker.service; do
+  if systemctl list-unit-files "$unit" 2>/dev/null | grep -q "^${unit}"; then
+    printf '%-24s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || true)"
+  fi
+done
+echo
+
+echo "=== Power ==="
+for target in sleep.target suspend.target hibernate.target hybrid-sleep.target; do
+  printf '%-24s %s\n' "$target" "$(systemctl is-enabled "$target" 2>/dev/null || true)"
+done
+echo
+
+echo "=== SSH ==="
+echo "port: ${SSH_PORT:-22}"
+[[ -f "$REAL_HOME/.ssh/authorized_keys" ]] && echo "authorized_keys: present" || echo "authorized_keys: missing"
+echo
+
+echo "=== Codex / CPA ==="
+if [[ -x "$REAL_HOME/.local/bin/codex-cpa" ]]; then
+  echo "wrapper: $REAL_HOME/.local/bin/codex-cpa"
+  echo "profile: $REAL_HOME/.codex/cpa.config.toml"
+  key_file="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
+  [[ -f "$key_file" ]] && echo "key:     present ($(stat -c '%U:%G:%a' "$key_file"))" || echo "key:     missing"
+else
+  echo "(not configured)"
+fi
+echo
+
+if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
+  echo "reboot: required"
+else
+  echo "reboot: not pending"
+fi

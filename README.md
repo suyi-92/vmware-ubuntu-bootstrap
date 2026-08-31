@@ -1,7 +1,7 @@
 # VMware Ubuntu Bootstrap
 
-> 状态：需求与实施规格 v0.1（2026-08-31）
-> 当前仓库只包含本规格文档，尚未实现或执行任何会修改 Ubuntu 的脚本。
+> 状态：可运行首版 v0.1（2026-08-31）
+> 已实现分阶段脚本、备份回滚和隔离测试；尚需在全新 VMware Ubuntu 24.04 快照上完成真实 canary，验证前不要用于唯一生产环境。
 
 ## 1. 项目目标
 
@@ -15,7 +15,15 @@
 4. 脚本按阶段完成固定 IP、电源策略、SSH、公用软件包、Codex 和 CPA Provider 配置。
 5. 脚本完成验证并输出状态；失败时停在明确阶段，不把部分成功冒充完整成功。
 
-本项目后续计划上传到 Git。仓库中只能保存源码、模板、测试和文档，不能保存真实 API key、私钥、运行日志、机器配置或备份。
+项目仓库为 `https://github.com/suyi-92/vmware-ubuntu-bootstrap`。仓库中只能保存源码、模板、测试和文档，不能保存真实 API key、私钥、运行日志、机器配置或备份。
+
+快速入口：
+
+```bash
+sudo bash install.sh
+```
+
+安装、恢复和验证细节分别见 [`docs/install-flow.md`](docs/install-flow.md)、[`docs/recovery.md`](docs/recovery.md) 和 [`docs/verification.md`](docs/verification.md)。
 
 ## 2. 当前范围与非目标
 
@@ -120,7 +128,7 @@ Get-Content $env:USERPROFILE\.ssh\id_ed25519.pub
 
 ## 5. 首次从 Git 启动的“鸡生蛋”流程
 
-自动代理脚本尚未运行时，Ubuntu 必须先临时使用 Windows 主机代理，才能安装依赖并克隆仓库。以下 URL 在仓库创建远端后再替换，不能在实现中猜测。
+自动代理脚本尚未运行时，Ubuntu 必须先临时使用 Windows 主机代理，才能安装依赖并克隆仓库。
 
 ```bash
 PROXY_HOST="192.168.1.100"
@@ -143,7 +151,7 @@ sudo apt-get \
 
 git -c http.proxy="$PROXY_URL" \
     -c https.proxy="$PROXY_URL" \
-    clone <GIT_REPOSITORY_URL> vmware-ubuntu-bootstrap
+    clone https://github.com/suyi-92/vmware-ubuntu-bootstrap.git vmware-ubuntu-bootstrap
 
 cd vmware-ubuntu-bootstrap
 sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
@@ -152,11 +160,14 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
 
 推荐使用“克隆、检查、再执行”的方式。远程 `curl | sudo bash` 只有在项目发布固定版本、提供校验值并完成安全评审后才考虑提供；首版不把未经检查的远程主分支直接管道给 root shell。
 
-## 6. 计划中的仓库结构
+## 6. 当前仓库结构
 
 ```text
 vmware-ubuntu-bootstrap/
 ├── README.md
+├── .github/workflows/ci.yml
+├── .gitattributes
+├── .gitignore
 ├── install.sh
 ├── bootstrap.sh
 ├── config.example.env
@@ -172,7 +183,11 @@ vmware-ubuntu-bootstrap/
 │   ├── 07-codex.sh
 │   ├── 08-validate.sh
 │   ├── 09-status.sh
-│   └── 10-rollback.sh
+│   ├── 10-rollback.sh
+│   ├── proxy_scan.py
+│   ├── cpa_client.py
+│   ├── render_codex_config.py
+│   └── secret_guard.py
 ├── templates/
 │   ├── apt-proxy.conf.tpl
 │   ├── systemd-proxy.conf.tpl
@@ -183,9 +198,14 @@ vmware-ubuntu-bootstrap/
 │   ├── recovery.md
 │   └── verification.md
 └── tests/
-    ├── test-input-validation.sh
-    ├── test-proxy-detection.py
-    └── test-config-rendering.py
+    ├── run.sh
+    ├── test_backup_rollback.sh
+    ├── test_status_read_only.sh
+    ├── test_preflight_dry_run.sh
+    ├── test_input_validation.sh
+    ├── test_proxy_detection.py
+    ├── test_cpa_client.py
+    └── test_config_rendering.py
 ```
 
 Shell 脚本统一使用 LF。Windows 上的 Git 应通过 `.gitattributes` 固定 `*.sh text eol=lf`。
@@ -303,7 +323,7 @@ unzip zip tar rsync
 gnupg lsb-release software-properties-common
 iproute2 iputils-ping iputils-arping dnsutils traceroute
 net-tools ethtool
-vim nano tmux htop tree ripgrep fd-find git-lfs bash-completion
+vim nano tmux htop tree ripgrep fd-find git-lfs bash-completion shellcheck ufw
 ```
 
 要求：
@@ -348,8 +368,9 @@ systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
 3. 通过 `ssh-keygen -lf` 验证每个公钥格式。
 4. 使用独立 `/etc/ssh/sshd_config.d/` drop-in，不直接重写完整 `sshd_config`。
 5. 应用前执行 `sshd -t`；失败则恢复。
-6. 不开启 root SSH。
-7. 默认保留密码登录，提示用户从 Windows 新开终端验证：
+6. 自动识别 Ubuntu 24.04 的 `ssh.socket` activation；保留当前 socket/service 模式，并在修改端口后重载对应 unit。
+7. 不开启 root SSH。
+8. 默认保留密码登录，提示用户从 Windows 新开终端验证：
 
 ```powershell
 ssh suyi@192.168.1.254
@@ -395,7 +416,7 @@ refresh_interval_ms = 0
 安全要求：
 
 - Provider 配置写入用户级 `~/.codex/config.toml`；项目级 `.codex/config.toml` 不接受 `model_provider` / `model_providers` 等认证重定向设置。
-- 使用 TOML 感知的合并方式，写入前备份现有配置；无法安全解析或合并就停止，不覆盖用户原配置。
+- 新机器可写入受管的用户主配置；若检测到用户已有 `~/.codex/config.toml`，则保留原文件，只创建 `~/.codex/cpa.config.toml` 和 `codex-cpa` 入口，不做不可靠的文本拼接。
 - API key 静默输入，保存到 `~/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key`，目录 `0700`、文件 `0600`。
 - `codex-cpa-token` 只读取该文件并把 token 输出给 Codex；API key 不写入 TOML、Git、日志、进程命令行或普通环境变量。
 - 如果改用 `env_key`，只作为显式兼容模式；不得把 key 明文写入仓库。

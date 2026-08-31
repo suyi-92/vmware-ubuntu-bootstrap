@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=00-lib.sh
+source "$SCRIPT_DIR/00-lib.sh"
+
+start_phase "validate"
+require_root
+load_config true
+resolve_real_user
+validate_config
+
+if is_dry_run; then
+  info "DRY-RUN: 配置合同通过；跳过依赖真实系统状态的最终验收。"
+  exit 0
+fi
+
+OS_RELEASE_FILE="${VUB_OS_RELEASE_FILE:-/etc/os-release}"
+# shellcheck disable=SC1090
+source "$OS_RELEASE_FILE"
+[[ "${ID:-}" == "ubuntu" && "${VERSION_ID:-}" == "24.04" ]] || die "系统版本验收失败。"
+
+systemctl is-active --quiet open-vm-tools || die "open-vm-tools 未运行。"
+systemctl is-active --quiet ssh.socket 2>/dev/null \
+  || systemctl is-active --quiet ssh 2>/dev/null \
+  || systemctl is-active --quiet sshd 2>/dev/null \
+  || die "SSH socket/service 未运行。"
+
+load_proxy_state || die "代理状态文件不存在。"
+curl -fsSI --connect-timeout 5 --max-time 20 https://github.com/ >/dev/null \
+  || die "root curl 代理验收失败。"
+run_as_user curl -fsSI --connect-timeout 5 --max-time 20 https://github.com/ >/dev/null \
+  || die "普通用户 curl 代理验收失败。"
+
+EXPECTED_PROXY="${http_proxy:-}"
+[[ -n "$EXPECTED_PROXY" ]] || die "代理 URL 为空。"
+[[ "$(git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
+  || die "系统 Git 代理验收失败。"
+[[ "$(run_as_user git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
+  || die "用户 Git 代理验收失败。"
+[[ "$(HOME=/root git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
+  || die "root Git 代理验收失败。"
+apt-config dump 2>/dev/null | grep -Fq "$EXPECTED_PROXY" || die "APT 代理验收失败。"
+
+if is_true "$CONFIGURE_STATIC_NETWORK"; then
+  TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
+  ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
+    || die "固定 IPv4 验收失败。"
+  ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关验收失败。"
+  getent hosts github.com >/dev/null 2>&1 || die "DNS 验收失败。"
+fi
+
+for target in sleep.target suspend.target hibernate.target hybrid-sleep.target; do
+  [[ "$(systemctl is-enabled "$target" 2>/dev/null || true)" == "masked" ]] \
+    || die "$target 尚未 mask。"
+done
+
+if command -v gsettings >/dev/null 2>&1 && [[ -S "/run/user/${REAL_UID}/bus" ]]; then
+  [[ "$(run_as_user_with_bus gsettings get org.gnome.desktop.session idle-delay)" == "uint32 0" ]] \
+    || die "GNOME idle-delay 验收失败。"
+  [[ "$(run_as_user_with_bus gsettings get org.gnome.desktop.screensaver lock-enabled)" == "false" ]] \
+    || die "GNOME lock-enabled 验收失败。"
+  [[ "$(run_as_user_with_bus gsettings get org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type)" == "'nothing'" ]] \
+    || die "GNOME AC sleep 策略验收失败。"
+fi
+
+SSHD_BIN="${VUB_SSHD_BIN:-/usr/sbin/sshd}"
+"$SSHD_BIN" -t
+SSHD_EFFECTIVE="$($SSHD_BIN -T)"
+grep -Fxq "port $SSH_PORT" <<<"$SSHD_EFFECTIVE" || die "sshd 有效端口验收失败。"
+grep -Fxq 'permitrootlogin no' <<<"$SSHD_EFFECTIVE" || die "root SSH 禁用验收失败。"
+if is_true "$DISABLE_SSH_PASSWORD"; then
+  grep -Fxq 'passwordauthentication no' <<<"$SSHD_EFFECTIVE" || die "SSH 密码禁用验收失败。"
+fi
+ss -H -ltn | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
+  || die "SSH 端口未监听。"
+grep -Fq '# BEGIN vmware-ubuntu-bootstrap keys' "$REAL_HOME/.ssh/authorized_keys" \
+  || die "受管 SSH 公钥块不存在。"
+if is_true "$ENABLE_UFW"; then
+  ufw status | grep -Eq "${SSH_PORT}/tcp|${SSH_PORT}[[:space:]]" || die "UFW SSH 规则验收失败。"
+fi
+
+if is_true "$CONFIGURE_CODEX"; then
+  KEY_FILE="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
+  PROFILE_FILE="$REAL_HOME/.codex/cpa.config.toml"
+  WRAPPER="$REAL_HOME/.local/bin/codex-cpa"
+  [[ -s "$KEY_FILE" && -x "$WRAPPER" && -s "$PROFILE_FILE" ]] || die "Codex/CPA 文件不完整。"
+  [[ "$(stat -c '%U:%G:%a' "$KEY_FILE")" == "$REAL_USER:$REAL_GROUP:600" ]] \
+    || die "CPA key 权限验收失败。"
+  run_as_user python3 - "$PROFILE_FILE" <<'PY'
+import pathlib
+import sys
+import tomllib
+with pathlib.Path(sys.argv[1]).open("rb") as handle:
+    data = tomllib.load(handle)
+assert data["model_provider"] == "cpa"
+assert data["model_providers"]["cpa"]["wire_api"] == "responses"
+PY
+  run_as_user python3 "$SCRIPT_DIR/cpa_client.py" models \
+    --base-url "$CPA_BASE_URL" --key-file "$KEY_FILE" --model "$CPA_MODEL_ID"
+  run_as_user "$WRAPPER" --version >/dev/null
+  python3 "$SCRIPT_DIR/secret_guard.py" --secret-file "$KEY_FILE" \
+    "$VUB_PROJECT_DIR" "$VUB_LOG_DIR" || die "API key 泄漏到仓库或日志。"
+fi
+
+FINAL_STATUS="configured-pending-reboot"
+if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
+  MARKER_MTIME="$(stat -c %Y "$VUB_STATE_DIR/reboot-required")"
+  BOOT_TIME="$(awk '$1 == "btime" {print $2}' /proc/stat)"
+  if [[ "$BOOT_TIME" =~ ^[0-9]+$ && "$BOOT_TIME" -gt "$MARKER_MTIME" ]]; then
+    clear_reboot_required
+    FINAL_STATUS="complete"
+  fi
+else
+  FINAL_STATUS="complete"
+fi
+
+mark_phase "$FINAL_STATUS" "all checks passed"
+if [[ "$FINAL_STATUS" == "complete" ]]; then
+  info "全部验收通过。"
+else
+  warn "配置验收通过，但仍需重启后再次运行：sudo bash install.sh --phase validate"
+fi
