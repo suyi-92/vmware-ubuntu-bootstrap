@@ -10,6 +10,8 @@ import sys
 import urllib.error
 import urllib.request
 
+USER_AGENT = "vmware-ubuntu-bootstrap/1.0"
+
 
 def read_key(path: str) -> str:
     key = pathlib.Path(path).read_text(encoding="utf-8").strip()
@@ -36,6 +38,7 @@ def request_json(
             "Authorization": f"Bearer {key}",
             "Accept": "application/json",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
     )
     try:

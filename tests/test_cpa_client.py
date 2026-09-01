@@ -15,7 +15,10 @@ import cpa_client  # noqa: E402
 
 
 class _Handler(http.server.BaseHTTPRequestHandler):
+    last_user_agent = ""
+
     def _authorized(self) -> bool:
+        type(self).last_user_agent = self.headers.get("User-Agent", "")
         return self.headers.get("Authorization") == "Bearer test-secret"
 
     def do_GET(self) -> None:  # noqa: N802
@@ -65,6 +68,7 @@ class CpaClientTests(unittest.TestCase):
     def test_models_and_responses(self) -> None:
         cpa_client.check_models(self.base_url, "test-secret", "test-model", False)
         cpa_client.check_responses(self.base_url, "test-secret", "test-model")
+        self.assertEqual(_Handler.last_user_agent, cpa_client.USER_AGENT)
 
     def test_missing_model_fails(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "not present"):
