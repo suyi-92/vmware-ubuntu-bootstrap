@@ -11,12 +11,20 @@ sudo bash install.sh --status
 
 ```bash
 curl -I https://github.com
-sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
+sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,all_proxy,ALL_PROXY,no_proxy,NO_PROXY \
   curl -I https://github.com
+wget -q --spider https://github.com
 git config --show-origin --get http.proxy
 sudo -H git config --show-origin --get http.proxy
 apt-config dump | grep -i proxy
+systemctl show-environment | grep -Ei '^(HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY)='
+systemctl show docker -p Environment
+python3 -m json.tool ~/.docker/config.json >/dev/null
+sudo python3 -m json.tool /root/.docker/config.json >/dev/null
+snap get system proxy.http 2>/dev/null || true
 ```
+
+Docker 默认安装。daemon 的代理用于拉取镜像；root/普通用户的 Docker client 配置会把代理传给 `docker build` 和新建容器，因此容器内的 npm、pip、curl 等常见下载工具也能沿用代理。
 
 ## 固定网络
 

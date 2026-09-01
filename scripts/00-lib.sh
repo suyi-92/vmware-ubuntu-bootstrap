@@ -154,6 +154,31 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "缺少必需命令：$1"
 }
 
+install_missing_apt_packages() {
+  local description="$1" package
+  shift
+  local -a missing=()
+
+  require_command apt-get
+  require_command dpkg-query
+  for package in "$@"; do
+    if ! dpkg-query -W -f='${Status}\n' "$package" 2>/dev/null | grep -Eq '(^|[[:space:]])ok installed$'; then
+      missing+=("$package")
+    fi
+  done
+
+  VUB_LAST_MISSING_PACKAGE_COUNT="${#missing[@]}"
+  if (( VUB_LAST_MISSING_PACKAGE_COUNT == 0 )); then
+    info "$description：全部已安装，跳过 APT。"
+    return 0
+  fi
+
+  info "$description：发现 $VUB_LAST_MISSING_PACKAGE_COUNT 个缺失包：${missing[*]}"
+  run_logged "APT 更新索引" env DEBIAN_FRONTEND=noninteractive apt-get update
+  run_logged "$description" env DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends "${missing[@]}"
+}
+
 resolve_real_user() {
   local candidate="${TARGET_USER:-}"
   if [[ -z "$candidate" || "$candidate" == "root" ]]; then
@@ -315,6 +340,7 @@ shell_quote() {
 }
 
 apply_config_defaults() {
+  : "${VUB_CONFIG_VERSION:=1}"
   : "${TARGET_USER:=}"
   : "${NETWORK_INTERFACE:=}"
   : "${PROXY_HOST:=}"
@@ -340,7 +366,7 @@ apply_config_defaults() {
   : "${CPA_BYPASS_PROXY:=false}"
   : "${RUN_CPA_SMOKE:=true}"
   : "${RUN_CODEX_SMOKE:=true}"
-  : "${INSTALL_DOCKER:=false}"
+  : "${INSTALL_DOCKER:=true}"
 }
 
 load_config() {
@@ -403,6 +429,7 @@ PY
 
 validate_config() {
   apply_config_defaults
+  [[ "$VUB_CONFIG_VERSION" =~ ^[0-9]+$ ]] || die "VUB_CONFIG_VERSION 必须是数字。"
   validate_port PROXY_PORT
   validate_port SSH_PORT
   validate_bool CONFIGURE_STATIC_NETWORK
@@ -744,7 +771,7 @@ load_proxy_state() {
   [[ -r "$path" ]] || return 1
   # shellcheck disable=SC1090
   source "$path"
-  export http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
+  export http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY
 }
 
 record_reboot_required() {

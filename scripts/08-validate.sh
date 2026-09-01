@@ -48,9 +48,17 @@ curl -fsSI --connect-timeout 5 --max-time 20 https://github.com/ >/dev/null \
   || die "root curl 代理验收失败。"
 run_as_user curl -fsSI --connect-timeout 5 --max-time 20 https://github.com/ >/dev/null \
   || die "普通用户 curl 代理验收失败。"
+if command -v wget >/dev/null 2>&1; then
+  wget -q --spider --timeout=20 https://github.com/ \
+    || die "root wget 代理验收失败。"
+  run_as_user wget -q --spider --timeout=20 https://github.com/ \
+    || die "普通用户 wget 代理验收失败。"
+fi
 
 EXPECTED_PROXY="${http_proxy:-}"
 [[ -n "$EXPECTED_PROXY" ]] || die "代理 URL 为空。"
+[[ "${https_proxy:-}" == "$EXPECTED_PROXY" && "${all_proxy:-}" == "$EXPECTED_PROXY" ]] \
+  || die "HTTP/HTTPS/ALL_PROXY 状态不一致。"
 [[ "$(git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
   || die "系统 Git 代理验收失败。"
 [[ "$(run_as_user git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
@@ -58,6 +66,46 @@ EXPECTED_PROXY="${http_proxy:-}"
 [[ "$(HOME=/root git config --get http.proxy 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
   || die "root Git 代理验收失败。"
 apt-config dump 2>/dev/null | grep -Fq "$EXPECTED_PROXY" || die "APT 代理验收失败。"
+visudo -cf /etc/sudoers >/dev/null || die "sudoers 语法验收失败。"
+grep -Fq 'all_proxy ALL_PROXY' /etc/sudoers.d/90-vmware-ubuntu-bootstrap-proxy-env \
+  || die "sudo 代理环境保留规则验收失败。"
+systemctl show-environment 2>/dev/null | grep -Fxq "ALL_PROXY=$EXPECTED_PROXY" \
+  || die "systemd ALL_PROXY 验收失败。"
+
+if command -v snap >/dev/null 2>&1; then
+  [[ "$(snap get system proxy.http 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
+    || die "Snap HTTP 代理验收失败。"
+  [[ "$(snap get system proxy.https 2>/dev/null || true)" == "$EXPECTED_PROXY" ]] \
+    || die "Snap HTTPS 代理验收失败。"
+fi
+
+if is_true "$INSTALL_DOCKER"; then
+  command -v docker >/dev/null 2>&1 || die "Docker CLI 未安装。"
+  systemctl is-active --quiet docker || die "Docker daemon 未运行。"
+  docker info >/dev/null 2>&1 || die "Docker daemon 不可用。"
+  run_as_user docker info >/dev/null 2>&1 || die "普通用户无权访问 Docker daemon。"
+  DOCKER_ENVIRONMENT="$(systemctl show docker --property=Environment --value 2>/dev/null || true)"
+  grep -Fq "HTTP_PROXY=$EXPECTED_PROXY" <<<"$DOCKER_ENVIRONMENT" \
+    || die "Docker daemon HTTP 代理验收失败。"
+  grep -Fq "HTTPS_PROXY=$EXPECTED_PROXY" <<<"$DOCKER_ENVIRONMENT" \
+    || die "Docker daemon HTTPS 代理验收失败。"
+  grep -Fq "NO_PROXY=${no_proxy:-}" <<<"$DOCKER_ENVIRONMENT" \
+    || die "Docker daemon NO_PROXY 验收失败。"
+  python3 - /root/.docker/config.json "$REAL_HOME/.docker/config.json" \
+      "$EXPECTED_PROXY" "${no_proxy:-}" <<'PY'
+import json
+import pathlib
+import sys
+
+root_path, user_path, proxy, no_proxy = sys.argv[1:]
+expected = {"httpProxy": proxy, "httpsProxy": proxy, "noProxy": no_proxy}
+for raw_path in (root_path, user_path):
+    path = pathlib.Path(raw_path)
+    actual = json.loads(path.read_text(encoding="utf-8")).get("proxies", {}).get("default", {})
+    if actual != expected:
+        raise SystemExit(f"Docker client proxy mismatch: {path}")
+PY
+fi
 
 NETWORK_DEFERRED="false"
 if is_true "$CONFIGURE_STATIC_NETWORK"; then

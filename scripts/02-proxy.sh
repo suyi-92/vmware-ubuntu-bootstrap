@@ -114,6 +114,8 @@ write_proxy_state() {
     printf 'https_proxy=%s\n' "$(shell_quote "$proxy_url")"
     printf 'HTTP_PROXY=%s\n' "$(shell_quote "$proxy_url")"
     printf 'HTTPS_PROXY=%s\n' "$(shell_quote "$proxy_url")"
+    printf 'all_proxy=%s\n' "$(shell_quote "$proxy_url")"
+    printf 'ALL_PROXY=%s\n' "$(shell_quote "$proxy_url")"
     printf 'no_proxy=%s\n' "$(shell_quote "$no_proxy_value")"
     printf 'NO_PROXY=%s\n' "$(shell_quote "$no_proxy_value")"
   } | write_managed_file "$VUB_ETC_DIR/proxy.env" 0644 root root
@@ -244,6 +246,21 @@ finally:
 PY
 }
 
+docker_client_proxy_matches() {
+  local path="$1" proxy_url="$2" no_proxy_value="$3"
+  python3 - "$path" "$proxy_url" "$no_proxy_value" <<'PY'
+import json
+import pathlib
+import sys
+
+path, proxy, no_proxy = sys.argv[1:]
+data = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+actual = data.get("proxies", {}).get("default", {})
+expected = {"httpProxy": proxy, "httpsProxy": proxy, "noProxy": no_proxy}
+raise SystemExit(0 if actual == expected else 1)
+PY
+}
+
 apply_proxy() {
   require_command curl
   require_command python3
@@ -255,7 +272,7 @@ apply_proxy() {
   proxy_url="http://${host}:${PROXY_PORT}"
   lan_cidr="${PROXY_SCAN_CIDR:-$(cidr24_for_ip "$(current_ipv4 "$NETWORK_INTERFACE")")}"
   cpa_host="$(cpa_host_for_no_proxy)"
-  no_proxy_value="localhost,127.0.0.1,::1,.local,${lan_cidr},${host}"
+  no_proxy_value="localhost,127.0.0.1,::1,.local,host.docker.internal,gateway.docker.internal,${lan_cidr},${host}"
   [[ -n "$GATEWAY_IPV4" ]] && no_proxy_value+=",${GATEWAY_IPV4}"
   [[ -n "$cpa_host" ]] && no_proxy_value+=",${cpa_host}"
 
@@ -267,6 +284,8 @@ apply_proxy() {
     printf 'https_proxy="%s"\n' "$proxy_url"
     printf 'HTTP_PROXY="%s"\n' "$proxy_url"
     printf 'HTTPS_PROXY="%s"\n' "$proxy_url"
+    printf 'all_proxy="%s"\n' "$proxy_url"
+    printf 'ALL_PROXY="%s"\n' "$proxy_url"
     printf 'no_proxy="%s"\n' "$no_proxy_value"
     printf 'NO_PROXY="%s"\n' "$no_proxy_value"
   } | replace_marked_block /etc/environment "$ENV_BEGIN" "$ENV_END" 0644
@@ -274,6 +293,7 @@ apply_proxy() {
   {
     printf '# Managed by vmware-ubuntu-bootstrap.\n'
     printf 'export http_proxy=%q https_proxy=%q HTTP_PROXY=%q HTTPS_PROXY=%q\n' "$proxy_url" "$proxy_url" "$proxy_url" "$proxy_url"
+    printf 'export all_proxy=%q ALL_PROXY=%q\n' "$proxy_url" "$proxy_url"
     printf 'export no_proxy=%q NO_PROXY=%q\n' "$no_proxy_value" "$no_proxy_value"
   } | write_managed_file "$PROFILE_FILE" 0644 root root
 
@@ -283,7 +303,7 @@ apply_proxy() {
   rm -f "$apt_tmp"
 
   sudoers_tmp="$(mktemp)"
-  printf 'Defaults env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY"\n' >"$sudoers_tmp"
+  printf 'Defaults env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy NO_PROXY"\n' >"$sudoers_tmp"
   visudo -cf "$sudoers_tmp" >/dev/null
   write_managed_file "$SUDOERS_FILE" 0440 root root <"$sudoers_tmp"
   rm -f "$sudoers_tmp"
@@ -325,6 +345,7 @@ apply_proxy() {
 
   if ! is_dry_run; then
     systemctl daemon-reexec
+    systemctl daemon-reload
     if systemctl is-active --quiet docker 2>/dev/null; then
       systemctl restart docker
     fi
@@ -345,6 +366,19 @@ apply_proxy() {
   apt-config dump 2>/dev/null | grep -Fq "${proxy_url}/" || die "APT 代理复验失败。"
   systemctl show-environment 2>/dev/null | grep -Fxq "HTTP_PROXY=$proxy_url" \
     || die "systemd manager 代理复验失败。"
+  if command -v docker >/dev/null 2>&1 || systemctl list-unit-files --type=service 2>/dev/null | grep -q '^docker\.service'; then
+    DOCKER_ENVIRONMENT="$(systemctl show docker --property=Environment --value 2>/dev/null || true)"
+    grep -Fq "HTTP_PROXY=$proxy_url" <<<"$DOCKER_ENVIRONMENT" \
+      || die "Docker daemon HTTP 代理复验失败。"
+    grep -Fq "HTTPS_PROXY=$proxy_url" <<<"$DOCKER_ENVIRONMENT" \
+      || die "Docker daemon HTTPS 代理复验失败。"
+    grep -Fq "NO_PROXY=$no_proxy_value" <<<"$DOCKER_ENVIRONMENT" \
+      || die "Docker daemon NO_PROXY 复验失败。"
+    docker_client_proxy_matches /root/.docker/config.json "$proxy_url" "$no_proxy_value" \
+      || die "root Docker client 代理复验失败。"
+    docker_client_proxy_matches "$REAL_HOME/.docker/config.json" "$proxy_url" "$no_proxy_value" \
+      || die "用户 Docker client 代理复验失败。"
+  fi
 
   complete_backup
   mark_phase complete "proxy=$proxy_url"
@@ -355,6 +389,7 @@ show_status() {
   echo "=== Managed proxy state ==="
   if load_proxy_state; then
     echo "proxy:    ${http_proxy:-未配置}"
+    echo "all_proxy: ${all_proxy:-未配置}"
     echo "no_proxy: ${no_proxy:-未配置}"
   else
     echo "(未配置)"
@@ -427,8 +462,9 @@ disable_proxy() {
 
   remove_managed_path "$VUB_ETC_DIR/proxy.env"
   if ! is_dry_run; then
-    systemctl unset-environment HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy 2>/dev/null || true
+    systemctl unset-environment HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy NO_PROXY no_proxy 2>/dev/null || true
     systemctl daemon-reexec
+    systemctl daemon-reload
     if systemctl is-active --quiet docker 2>/dev/null; then
       systemctl restart docker || true
     fi

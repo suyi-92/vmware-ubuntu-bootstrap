@@ -57,7 +57,7 @@ class ConfigRenderingTests(unittest.TestCase):
         )
         self.assertIn('read_default "CPA 模型编号"', install_script)
         self.assertIn('CPA_BYPASS_PROXY="true"', install_script)
-        self.assertIn("当前唯一可选安装组件：Docker Engine", install_script)
+        self.assertIn("Docker Engine 默认安装", install_script)
         self.assertIn('CONFIRM_SSH_KEY_LOGIN="$DISABLE_SSH_PASSWORD"', install_script)
         self.assertNotIn("Windows 公钥已在另一终端登录成功", install_script)
         self.assertIn(
@@ -70,6 +70,33 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertNotIn("read -r -s -n 1", shell_library)
         self.assertIn("printf '*'", shell_library)
         self.assertNotIn("[默认:", shell_library)
+
+    def test_dependency_and_proxy_contract(self) -> None:
+        bootstrap = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
+        packages = (ROOT / "scripts" / "03-packages.sh").read_text(encoding="utf-8")
+        proxy = (ROOT / "scripts" / "02-proxy.sh").read_text(encoding="utf-8")
+        shell_library = (ROOT / "scripts" / "00-lib.sh").read_text(encoding="utf-8")
+        example = (ROOT / "config.example.env").read_text(encoding="utf-8")
+        self.assertIn("ensure_startup_dependencies", bootstrap)
+        self.assertIn("scripts/00-dependencies.sh", bootstrap)
+        self.assertIn(': "${INSTALL_DOCKER:=true}"', shell_library)
+        self.assertIn('VUB_CONFIG_VERSION="2"', example)
+        self.assertIn('INSTALL_DOCKER="true"', example)
+        self.assertIn(
+            'if [[ "$VUB_CONFIG_VERSION" == "1" ]]',
+            (ROOT / "install.sh").read_text(encoding="utf-8"),
+        )
+        for package in (
+            "meson",
+            "ninja-build",
+            "libpcsclite-dev",
+            "libcurl4-openssl-dev",
+            "vsmartcard-vpcd",
+            "modemmanager",
+        ):
+            self.assertIn(package, packages)
+        self.assertIn("all_proxy", proxy)
+        self.assertIn("host.docker.internal", proxy)
 
     def test_runtime_and_secret_files_are_ignored(self) -> None:
         for relative in ("config.env", "secrets/cpa-api-key", "run.log", "state/x"):

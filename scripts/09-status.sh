@@ -43,6 +43,7 @@ echo
 echo "=== Proxy ==="
 if load_proxy_state; then
   echo "proxy:    ${http_proxy:-未配置}"
+  echo "all_proxy: ${all_proxy:-未配置}"
   echo "no_proxy: ${no_proxy:-未配置}"
 else
   echo "(not managed)"

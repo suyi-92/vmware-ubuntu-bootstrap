@@ -16,21 +16,31 @@ require_command apt-get
 PACKAGES=(
   git curl wget ca-certificates openssh-server
   open-vm-tools open-vm-tools-desktop
-  jq python3 python3-venv python3-pip pipx
+  jq python3 python3-venv python3-pip python3-dev pipx
   build-essential pkg-config
-  unzip zip tar rsync
+  unzip zip tar xz-utils rsync findutils diffutils
   gnupg lsb-release software-properties-common
   iproute2 iputils-ping iputils-arping dnsutils traceroute
-  net-tools ethtool
+  net-tools ethtool procps
   vim nano tmux htop tree ripgrep fd-find git-lfs bash-completion shellcheck ufw
 )
+
+# mdd-sim-gateway 的正式 Linux 安装链会在宿主机编译 pcsc-lite、CCID/vpcd、
+# pyscard 和 lpac；Engine 与 WebUI 由 Docker 构建，因此不需要宿主机 Node。
+MDD_BUILD_PACKAGES=(
+  autoconf automake cmake flex help2man libtool meson ninja-build patch perl swig
+  libccid pcscd pcsc-tools vsmartcard-vpcd
+  libpcsclite-dev libudev-dev libsystemd-dev libusb-1.0-0-dev zlib1g-dev
+  libffi-dev libssl-dev libcurl4-openssl-dev openssl
+  modemmanager network-manager dbus udev usbutils
+)
+PACKAGES+=("${MDD_BUILD_PACKAGES[@]}")
 
 if is_true "$INSTALL_DOCKER"; then
   PACKAGES+=(docker.io)
 fi
 
-run_logged "APT 更新索引" env DEBIAN_FRONTEND=noninteractive apt-get update
-run_logged "安装常用软件包" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${PACKAGES[@]}"
+install_missing_apt_packages "安装常用、运行与构建软件包" "${PACKAGES[@]}"
 
 if is_dry_run; then
   info "DRY-RUN: verify open-vm-tools desktop clipboard integration"

@@ -14,7 +14,7 @@ usage() {
   sudo bash bootstrap.sh --phase <phase> [--config config.env] [--dry-run] [--yes] [--verbose]
 
 阶段：
-  full, preflight, proxy, proxy-status, proxy-off, packages,
+  full, dependencies, preflight, proxy, proxy-status, proxy-off, packages,
   static-network, power, ssh, codex, validate, status, rollback
 EOF
 }
@@ -50,6 +50,7 @@ export VUB_CONFIG_FILE VUB_DRY_RUN VUB_YES VUB_VERBOSE
 
 phase_script() {
   case "$1" in
+    dependencies) printf '%s\n' "$PROJECT_DIR/scripts/00-dependencies.sh" ;;
     preflight) printf '%s\n' "$PROJECT_DIR/scripts/01-preflight.sh" ;;
     proxy|proxy-status|proxy-off) printf '%s\n' "$PROJECT_DIR/scripts/02-proxy.sh" ;;
     packages) printf '%s\n' "$PROJECT_DIR/scripts/03-packages.sh" ;;
@@ -62,6 +63,18 @@ phase_script() {
     rollback) printf '%s\n' "$PROJECT_DIR/scripts/10-rollback.sh" ;;
     *) return 1 ;;
   esac
+}
+
+ensure_startup_dependencies() {
+  if is_true "${VUB_STARTUP_DEPS_READY:-false}"; then
+    return 0
+  fi
+  if ! run_one_phase dependencies; then
+    handle_phase_failure dependencies
+    return 1
+  fi
+  VUB_STARTUP_DEPS_READY="true"
+  export VUB_STARTUP_DEPS_READY
 }
 
 run_one_phase() {
@@ -106,6 +119,7 @@ handle_phase_failure() {
 
 run_full() {
   local phase
+  ensure_startup_dependencies || return 1
   for phase in preflight proxy packages static-network power ssh codex validate; do
     if ! run_one_phase "$phase"; then
       handle_phase_failure "$phase"
@@ -116,7 +130,20 @@ run_full() {
 
 case "$PHASE" in
   full) run_full ;;
-  preflight|proxy|proxy-status|proxy-off|packages|static-network|power|ssh|codex|validate|status|rollback)
+  dependencies)
+    if ! run_one_phase "$PHASE"; then
+      handle_phase_failure "$PHASE"
+      exit 1
+    fi
+    ;;
+  preflight|proxy|packages|static-network|power|ssh|codex)
+    ensure_startup_dependencies || exit 1
+    if ! run_one_phase "$PHASE"; then
+      handle_phase_failure "$PHASE"
+      exit 1
+    fi
+    ;;
+  proxy-status|proxy-off|validate|status|rollback)
     if ! run_one_phase "$PHASE"; then
       handle_phase_failure "$PHASE"
       exit 1

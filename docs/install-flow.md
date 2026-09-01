@@ -51,6 +51,7 @@ ssh suyi@192.168.1.106
 PROXY_URL="http://192.168.1.100:7890"
 export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL"
 export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL"
+export all_proxy="$PROXY_URL" ALL_PROXY="$PROXY_URL"
 ```
 
 执行远程入口：
@@ -59,7 +60,9 @@ export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL"
 bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstrap/main/install.sh)
 ```
 
-不要给这条命令添加 `sudo`。入口会安装缺失的 Git，将仓库准备到 `~/vmware-ubuntu-bootstrap`，然后由本地安装器自行提权。
+不要给这条命令添加 `sudo`。入口会安装缺失的 Git、curl、Python、证书和网络基础命令，将仓库准备到 `~/vmware-ubuntu-bootstrap`，然后由本地安装器自行提权。
+
+本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再只安装其余缺失的常用包、Docker 和编译工具链；Docker 默认为安装。
 
 安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 只显示 `*` 掩码，真实字符不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。首次安装保持“关闭 SSH 密码登录”为 `N`，确认 Windows 公钥可以从另一终端登录后再改为 `Y`。公网 CPA `/v1` 地址必须使用 HTTPS。输入 key 后会请求 `/v1/models`：单模型自动采用，多模型按编号选择，已有模型作为默认项。
 
@@ -80,6 +83,7 @@ sudo bash install.sh --phase static-network
 
 ```bash
 cd ~/vmware-ubuntu-bootstrap
+sudo bash install.sh --phase dependencies
 sudo bash install.sh --phase preflight
 sudo bash install.sh --phase proxy
 sudo bash install.sh --phase packages
