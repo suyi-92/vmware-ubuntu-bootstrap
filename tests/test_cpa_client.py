@@ -34,10 +34,15 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0"))
         body = json.loads(self.rfile.read(length))
+        if body.get("model") == "error-model":
+            self._send({"error": {"message": "fixture failure"}})
+            return
         if body.get("model") != "test-model":
             self.send_error(400)
             return
-        self._send({"id": "resp_test", "object": "response", "output": []})
+        self._send(
+            {"id": "resp_test", "object": "response", "output": [], "error": None}
+        )
 
     def _send(self, payload: dict[str, object]) -> None:
         encoded = json.dumps(payload).encode("utf-8")
@@ -69,6 +74,12 @@ class CpaClientTests(unittest.TestCase):
         cpa_client.check_models(self.base_url, "test-secret", "test-model", False)
         cpa_client.check_responses(self.base_url, "test-secret", "test-model")
         self.assertEqual(_Handler.last_user_agent, cpa_client.USER_AGENT)
+
+    def test_non_null_api_error_fails(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "API error"):
+            cpa_client.check_responses(
+                self.base_url, "test-secret", "error-model"
+            )
 
     def test_missing_model_fails(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "not present"):

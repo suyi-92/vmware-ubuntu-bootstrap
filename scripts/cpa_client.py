@@ -54,7 +54,7 @@ def request_json(
         raise RuntimeError(f"CPA returned non-JSON data for {url}") from exc
     if not isinstance(decoded, dict):
         raise RuntimeError(f"CPA returned a non-object JSON value for {url}")
-    if "error" in decoded:
+    if decoded.get("error") is not None:
         raise RuntimeError(f"CPA returned an API error for {url}")
     return decoded
 
