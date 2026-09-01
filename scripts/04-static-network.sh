@@ -78,12 +78,32 @@ if [[ "$CURRENT_IPV4" != "$TARGET_IPV4" ]]; then
   rm -f "/tmp/vub-arping.$$.log"
 fi
 
-NETPLAN_FILE="${VUB_NETPLAN_FILE:-/etc/netplan/90-vmware-ubuntu-bootstrap-static.yaml}"
+NETPLAN_DIR="${VUB_NETPLAN_DIR:-/etc/netplan}"
+NETPLAN_FILE="${VUB_NETPLAN_FILE:-$NETPLAN_DIR/90-vmware-ubuntu-bootstrap-static.yaml}"
 DNS_YAML="$(python3 - "$DNS_SERVERS" <<'PY'
 import sys
 print(", ".join(sys.argv[1].split()))
 PY
 )"
+
+netplan_files=()
+shopt -s nullglob
+netplan_files=("$NETPLAN_DIR"/*.yaml "$NETPLAN_DIR"/*.yml)
+shopt -u nullglob
+normalized_netplan_files=0
+for netplan_path in "${netplan_files[@]}"; do
+  [[ ! -L "$netplan_path" ]] || die "拒绝修改 Netplan 符号链接：$netplan_path"
+  [[ -f "$netplan_path" ]] || continue
+  if [[ "$(stat -c '%U:%G:%a' "$netplan_path")" != "root:root:600" ]]; then
+    backup_path "$netplan_path"
+    run chown root:root "$netplan_path"
+    run chmod 0600 "$netplan_path"
+    normalized_netplan_files=$((normalized_netplan_files + 1))
+  fi
+done
+if (( normalized_netplan_files > 0 )); then
+  info "已将 $normalized_netplan_files 个现有 Netplan YAML 文件规范为 root:root:600。"
+fi
 
 {
   cat <<EOF

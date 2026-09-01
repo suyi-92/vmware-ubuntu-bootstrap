@@ -36,6 +36,10 @@ MDD_BUILD_PACKAGES=(
 )
 PACKAGES+=("${MDD_BUILD_PACKAGES[@]}")
 
+if is_true "$CONFIGURE_CODEX"; then
+  PACKAGES+=(bubblewrap apparmor-profiles apparmor-utils)
+fi
+
 if is_true "$INSTALL_DOCKER"; then
   PACKAGES+=(docker.io)
 fi

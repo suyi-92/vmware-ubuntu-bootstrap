@@ -32,9 +32,10 @@ Docker 默认安装。daemon 的代理用于拉取镜像；root/普通用户的 
 ip -4 address show dev ens33
 ip -4 route
 resolvectl status ens33
+sudo stat -c '%U:%G:%a %n' /etc/netplan/*.yaml
 ```
 
-确认重启后仍为预期地址，且没有和网关、Windows 主机或 DHCP 设备冲突。
+确认重启后仍为预期地址，且没有和网关、Windows 主机或 DHCP 设备冲突；Netplan YAML 应为 `root:root:600`。
 
 ## 电源策略
 
@@ -78,6 +79,8 @@ ssh -p 22 suyi@192.168.1.254
 codex --version
 grep -E '^(model|model_provider|base_url|wire_api)' ~/.codex/config.toml
 stat -c '%U:%G:%a %n' ~/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key
+codex sandbox -- bash -lc 'echo sandbox-ok'
+codex doctor --summary
 ```
 
-`model_provider` 应为 `cpa`，随后直接运行 `codex`。API key 文件必须为当前用户所有且权限为 `600`。不要把 key 或 Authorization header 粘贴到诊断日志。
+`model_provider` 应为 `cpa`，sandbox 命令应输出 `sandbox-ok`，Doctor 应为 `0 warn · 0 fail`，随后直接运行 `codex`。API key 文件必须为当前用户所有且权限为 `600`。不要把 key 或 Authorization header 粘贴到诊断日志。

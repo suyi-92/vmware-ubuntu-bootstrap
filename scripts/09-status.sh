@@ -110,6 +110,11 @@ if [[ -x "$codex_bin" && -s "$REAL_HOME/.codex/config.toml" ]]; then
   echo "command:  codex"
   echo "binary:   $codex_bin"
   echo "config:   $REAL_HOME/.codex/config.toml"
+  if command -v bwrap >/dev/null 2>&1 && [[ -f /etc/apparmor.d/bwrap-userns-restrict ]]; then
+    echo "sandbox:  bubblewrap/AppArmor configured"
+  else
+    echo "sandbox:  incomplete"
+  fi
   key_file="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
   [[ -f "$key_file" ]] && echo "key:     present ($(stat -c '%U:%G:%a' "$key_file"))" || echo "key:     missing"
 else

@@ -34,7 +34,11 @@ EOF
 
 BIN_DIR="$FIXTURE_ROOT/bin"
 COMMAND_LOG="$FIXTURE_ROOT/commands.log"
-mkdir -p "$BIN_DIR"
+NETPLAN_DIR="$FIXTURE_ROOT/netplan"
+ORIGINAL_NETPLAN="$NETPLAN_DIR/01-network-manager-all.yaml"
+mkdir -p "$BIN_DIR" "$NETPLAN_DIR"
+printf 'network:\n  version: 2\n' >"$ORIGINAL_NETPLAN"
+chmod 0644 "$ORIGINAL_NETPLAN"
 cat >"$BIN_DIR/ip" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
@@ -64,7 +68,8 @@ export VUB_ETC_DIR="$FIXTURE_ROOT/etc-state"
 export VUB_STATE_DIR="$FIXTURE_ROOT/state"
 export VUB_LOG_DIR="$FIXTURE_ROOT/log"
 export VUB_BACKUP_ROOT="$FIXTURE_ROOT/backups"
-export VUB_NETPLAN_FILE="$FIXTURE_ROOT/netplan/90-vmware-ubuntu-bootstrap-static.yaml"
+export VUB_NETPLAN_DIR="$NETPLAN_DIR"
+export VUB_NETPLAN_FILE="$NETPLAN_DIR/90-vmware-ubuntu-bootstrap-static.yaml"
 export SSH_CONNECTION="192.0.2.10 50000 192.0.2.20 22"
 
 bash "$ROOT/scripts/04-static-network.sh" >/dev/null
@@ -75,6 +80,7 @@ source "$VUB_STATE_DIR/static-network.state"
 [[ "$status" == "pending-reboot" ]]
 [[ "$detail" == "ip=192.168.1.254/24;gateway=192.168.1.1;activation=reboot" ]]
 [[ -f "$VUB_STATE_DIR/reboot-required" ]]
+[[ "$(stat -c '%U:%G:%a' "$ORIGINAL_NETPLAN")" == "root:root:600" ]]
 grep -Fq 'dhcp4: false' "$VUB_NETPLAN_FILE"
 grep -Fq 'addresses: [192.168.1.254/24]' "$VUB_NETPLAN_FILE"
 grep -Fxq 'generate' "$COMMAND_LOG"

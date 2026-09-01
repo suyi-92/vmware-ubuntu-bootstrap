@@ -13,7 +13,7 @@
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
 - 安装 `open-vm-tools`、`open-vm-tools-desktop`，支持 Windows 与 Ubuntu 桌面之间复制粘贴。
 - 自动检查并只安装缺失的软件包，默认安装 Docker，并预装 PC/SC、CCID、Python 原生扩展和容器构建工具链。
-- 安装 Codex CLI，并可配置指向 CPA `/v1` Responses API 的自定义 Provider。
+- 安装 Codex CLI，并可配置指向 CPA `/v1` Responses API 的自定义 Provider；在 Ubuntu 24.04 上自动准备 bubblewrap/AppArmor sandbox。
 - 保存分阶段状态、受保护日志和配置备份，支持检查与回滚。
 
 `7890` HTTP/Mixed 代理只覆盖支持 HTTP/HTTPS 代理的程序，不等同于 TUN 或透明代理，不会接管 ICMP、任意 UDP 或不支持代理设置的程序。
@@ -116,7 +116,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 远程入口会先安装缺失的 Git、curl、Python、证书或网络基础命令，把仓库克隆或快进更新到 `~/vmware-ubuntu-bootstrap`，再启动仓库内的交互安装器。请以普通 Ubuntu 用户运行这条命令，不要在前面添加 `sudo`；安装器会在需要时自行提权。
 
-通过 SSH 运行时，脚本会校验目标地址并写入 Netplan，但不会立即切断当前 DHCP SSH 连接；固定地址会在重启时生效，不需要再回 VMware 控制台执行网络阶段。完整安装结束后运行：
+通过 SSH 运行时，脚本会规范现有 Netplan YAML 权限、校验目标地址并写入固定网络，但不会立即切断当前 DHCP SSH 连接；固定地址会在重启时生效，不需要再回 VMware 控制台执行网络阶段。完整安装结束后运行：
 
 ```bash
 sudo reboot
@@ -155,10 +155,11 @@ CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存
 安装器会使用 API key 请求 CPA `/v1/models`：只有一个模型时自动选择；有多个模型时显示编号列表，并优先把上次使用的模型作为默认选项。接口通常不提供模型质量排名，因此安装器不会擅自宣称某个模型“最好”。
 模型检测会先沿用当前代理；如果代理返回拒绝而直连成功，脚本会自动把该 CPA 主机加入 `NO_PROXY`，后续 CPA 和 Codex 请求保持同一条可用路径。
 CPA Provider 会直接写入当前用户的 `~/.codex/config.toml`，安装完成后使用标准命令 `codex`；项目不要求额外的包装命令。
+启用 Codex 时会按照 [OpenAI Linux sandbox 指南](https://developers.openai.com/codex/sandboxing) 安装 `bubblewrap`、`apparmor-profiles` 和 `apparmor-utils`，复制并加载 Ubuntu 24.04 的 `bwrap-userns-restrict` profile，再执行不调用 API 的本地 sandbox 验证。
 
 Docker Engine 默认安装，包含 Docker daemon、CLI、用户组和代理配置；如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW 与关闭 SSH 密码登录在各自配置分类中独立选择。
 
-完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，再通过 `dpkg-query` 检查并安装其余缺失包，已安装的软件不会重复下载。为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链包含 Docker、Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境。WebUI 按该项目的正式安装方式使用固定 Node 容器构建，不要求宿主机另装 Node/npm。
+完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，再通过 `dpkg-query` 检查并安装其余缺失包，已安装的软件不会重复下载。为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链包含 Docker、Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 按该项目的正式安装方式使用固定 Node 容器构建，不要求宿主机另装 Node/npm。
 
 ## 7. SSH 配置结果
 

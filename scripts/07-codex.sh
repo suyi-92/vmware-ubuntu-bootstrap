@@ -22,6 +22,23 @@ CPA_BASE_URL="$(validate_cpa_url "$CPA_BASE_URL")"
 [[ -n "$CPA_MODEL_ID" ]] || die "CPA_MODEL_ID 不能为空。"
 load_proxy_state || warn "没有持久化代理状态；Codex 安装将使用当前环境或直连。"
 
+CODEX_SANDBOX_PACKAGES=(bubblewrap apparmor-profiles apparmor-utils)
+install_missing_apt_packages "安装 Codex Linux sandbox 依赖" "${CODEX_SANDBOX_PACKAGES[@]}"
+
+BWRAP_PROFILE_SOURCE="${VUB_BWRAP_PROFILE_SOURCE:-/usr/share/apparmor/extra-profiles/bwrap-userns-restrict}"
+BWRAP_PROFILE_TARGET="${VUB_BWRAP_PROFILE_TARGET:-/etc/apparmor.d/bwrap-userns-restrict}"
+if is_dry_run; then
+  info "DRY-RUN: install and load $BWRAP_PROFILE_TARGET"
+else
+  require_command bwrap
+  require_command apparmor_parser
+  [[ -r "$BWRAP_PROFILE_SOURCE" ]] \
+    || die "缺少 Ubuntu 24.04 bubblewrap AppArmor profile：$BWRAP_PROFILE_SOURCE"
+  write_managed_file "$BWRAP_PROFILE_TARGET" 0644 root root <"$BWRAP_PROFILE_SOURCE"
+  run apparmor_parser -r "$BWRAP_PROFILE_TARGET"
+  info "Codex Linux sandbox 的 bubblewrap/AppArmor 环境已配置。"
+fi
+
 USER_CONFIG_ROOT="$REAL_HOME/.config/vmware-ubuntu-bootstrap"
 SECRET_DIR="$USER_CONFIG_ROOT/secrets"
 KEY_FILE="$SECRET_DIR/cpa-api-key"
@@ -127,6 +144,9 @@ PY
   fi
 
   run_as_user "$CODEX_BIN" --version
+  SANDBOX_OUTPUT="$(run_as_user "$CODEX_BIN" sandbox -- /bin/bash -lc 'printf "sandbox-ok\n"')"
+  [[ "$SANDBOX_OUTPUT" == "sandbox-ok" ]] || die "Codex Linux sandbox 验证失败。"
+  info "Codex Linux sandbox 验证通过。"
   if is_true "$RUN_CODEX_SMOKE"; then
     warn "执行一次最小 codex exec 请求，可能产生少量 API 费用。"
     run_as_user timeout 120 "$CODEX_BIN" exec --skip-git-repo-check \

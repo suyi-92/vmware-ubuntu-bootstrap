@@ -42,6 +42,9 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn('MAIN_CONFIG="$CODEX_DIR/config.toml"', codex_script)
         self.assertIn('write_user_file "$MAIN_CONFIG" 0600', codex_script)
         self.assertIn('run_as_user timeout 120 "$CODEX_BIN" exec', codex_script)
+        self.assertIn("CODEX_SANDBOX_PACKAGES", codex_script)
+        self.assertIn("bwrap-userns-restrict", codex_script)
+        self.assertIn('"$CODEX_BIN" sandbox -- /bin/bash', codex_script)
         self.assertIn("请直接运行：codex", codex_script)
         self.assertNotIn("CODEX_WRAPPER", codex_script)
         self.assertNotIn('exec $(shell_quote "$CODEX_BIN") --profile', codex_script)
@@ -58,6 +61,8 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn('SSH_ACTIVATION_ON_REBOOT="true"', static_network)
         self.assertIn("mark_phase pending-reboot", static_network)
         self.assertIn("重启后请从 Windows 连接", static_network)
+        self.assertIn("root:root:600", static_network)
+        self.assertIn("现有 Netplan YAML 文件", static_network)
         self.assertNotIn("requires VMware console", static_network)
         self.assertNotIn("固定网络将安全延后", preflight)
 
@@ -128,6 +133,9 @@ class ConfigRenderingTests(unittest.TestCase):
             "libcurl4-openssl-dev",
             "vsmartcard-vpcd",
             "modemmanager",
+            "bubblewrap",
+            "apparmor-profiles",
+            "apparmor-utils",
         ):
             self.assertIn(package, packages)
         self.assertIn("all_proxy", proxy)

@@ -62,13 +62,13 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 不要给这条命令添加 `sudo`。入口会安装缺失的 Git、curl、Python、证书和网络基础命令，将仓库准备到 `~/vmware-ubuntu-bootstrap`，然后由本地安装器自行提权。
 
-本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再只安装其余缺失的常用包、Docker 和编译工具链；Docker 默认为安装。
+本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再只安装其余缺失的常用包、Docker 和编译工具链；Docker 默认为安装。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
 
 安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 只显示 `*` 掩码，真实字符不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。首次安装保持“关闭 SSH 密码登录”为 `N`，确认 Windows 公钥可以从另一终端登录后再改为 `Y`。公网 CPA `/v1` 地址必须使用 HTTPS。输入 key 后会请求 `/v1/models`：单模型自动采用，多模型按编号选择，已有模型作为默认项。
 
 ## 4. 从 SSH 安装时的固定网络处理
 
-通过 SSH 运行完整安装时，脚本会先检查目标固定地址是否冲突，写入并校验 Netplan，然后把网络阶段标记为 `pending-reboot`。它不会在当前会话中执行 `netplan apply`，因此当前 DHCP SSH 连接不会中断，后续软件包、VMware Tools、SSH 和 Codex 阶段可以继续完成。
+通过 SSH 运行完整安装时，脚本会先把现有 Netplan YAML 规范为 `root:root:600`、检查目标固定地址是否冲突，再写入并校验 Netplan，然后把网络阶段标记为 `pending-reboot`。它不会在当前会话中执行 `netplan apply`，因此当前 DHCP SSH 连接不会中断，后续软件包、VMware Tools、SSH 和 Codex 阶段可以继续完成。
 
 其余阶段完成后直接在当前 SSH 会话执行：
 

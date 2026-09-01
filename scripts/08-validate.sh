@@ -120,6 +120,16 @@ if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
 fi
 
 if is_true "$CONFIGURE_STATIC_NETWORK"; then
+  NETPLAN_DIR="${VUB_NETPLAN_DIR:-/etc/netplan}"
+  netplan_files=()
+  shopt -s nullglob
+  netplan_files=("$NETPLAN_DIR"/*.yaml "$NETPLAN_DIR"/*.yml)
+  shopt -u nullglob
+  for netplan_path in "${netplan_files[@]}"; do
+    [[ ! -L "$netplan_path" ]] || die "Netplan 配置不能是符号链接：$netplan_path"
+    [[ "$(stat -c '%U:%G:%a' "$netplan_path")" == "root:root:600" ]] \
+      || die "Netplan 文件权限验收失败：$netplan_path"
+  done
   STATIC_NETWORK_STATUS="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
   if [[ "$STATIC_NETWORK_STATUS" == "pending-reboot" ]] && is_true "$REBOOT_PENDING_FOR_CURRENT_BOOT"; then
     warn "固定网络已写入磁盘；当前 SSH 地址保持不变，重启后切换到 ${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}/${PREFIX_LENGTH}。"
@@ -170,6 +180,18 @@ fi
 if is_true "$CONFIGURE_CODEX"; then
   KEY_FILE="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
   CODEX_CONFIG="$REAL_HOME/.codex/config.toml"
+  BWRAP_PROFILE_TARGET="${VUB_BWRAP_PROFILE_TARGET:-/etc/apparmor.d/bwrap-userns-restrict}"
+  for sandbox_package in bubblewrap apparmor-profiles apparmor-utils; do
+    dpkg-query -W -f='${Status}\n' "$sandbox_package" 2>/dev/null \
+      | grep -Fxq 'install ok installed' \
+      || die "Codex sandbox 软件包未安装：$sandbox_package"
+  done
+  command -v bwrap >/dev/null 2>&1 || die "Codex sandbox 缺少 bwrap。"
+  command -v apparmor_parser >/dev/null 2>&1 || die "Codex sandbox 缺少 apparmor_parser。"
+  [[ -f "$BWRAP_PROFILE_TARGET" && ! -L "$BWRAP_PROFILE_TARGET" ]] \
+    || die "Codex sandbox AppArmor profile 不存在或不安全。"
+  [[ "$(stat -c '%U:%G:%a' "$BWRAP_PROFILE_TARGET")" == "root:root:644" ]] \
+    || die "Codex sandbox AppArmor profile 权限验收失败。"
   CODEX_BIN="$REAL_HOME/.local/bin/codex"
   [[ -x "$CODEX_BIN" ]] || CODEX_BIN="$REAL_HOME/.codex/bin/codex"
   if [[ ! -x "$CODEX_BIN" ]]; then
@@ -190,6 +212,8 @@ PY
   run_as_user python3 "$SCRIPT_DIR/cpa_client.py" models \
     --base-url "$CPA_BASE_URL" --key-file "$KEY_FILE" --model "$CPA_MODEL_ID"
   run_as_user "$CODEX_BIN" --version >/dev/null
+  SANDBOX_OUTPUT="$(run_as_user "$CODEX_BIN" sandbox -- /bin/bash -lc 'printf "sandbox-ok\n"')"
+  [[ "$SANDBOX_OUTPUT" == "sandbox-ok" ]] || die "Codex Linux sandbox 验收失败。"
   python3 "$SCRIPT_DIR/secret_guard.py" --secret-file "$KEY_FILE" \
     "$VUB_PROJECT_DIR" "$VUB_LOG_DIR" || die "API key 泄漏到仓库或日志。"
 fi
