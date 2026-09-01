@@ -214,7 +214,7 @@ collect_config() {
 
   local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input=""
   detected_user="${TARGET_USER:-${SUDO_USER:-}}"
-  TARGET_USER="$(read_default "目标普通用户" "$detected_user")"
+  TARGET_USER="$(read_default "要配置的 Ubuntu 登录用户（通常直接回车）" "$detected_user")"
   resolve_real_user
 
   detected_iface="$(current_interface)"

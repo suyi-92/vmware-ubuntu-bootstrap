@@ -68,6 +68,16 @@ Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
 
 刚安装好的 Ubuntu 尚未具备 VMware 复制粘贴支持。为了避免在虚拟机控制台输入长命令，只需要先在 Ubuntu 控制台完成最短的 SSH 引导。
 
+先在 Windows PowerShell 中查看当前联网网卡的局域网 IPv4：
+
+```powershell
+Get-NetIPConfiguration |
+    Where-Object { $_.NetAdapter.Status -eq 'Up' -and $_.IPv4DefaultGateway -ne $null } |
+    Select-Object InterfaceAlias, @{Name='IPv4'; Expression={$_.IPv4Address.IPAddress}}
+```
+
+如果输出多个地址，选择 `Wi-Fi` 或 `Ethernet` 中与 Ubuntu 桥接地址处于同一网段的地址。例如 Ubuntu 是 `192.168.1.106`，通常应选择同为 `192.168.1.*` 的 Windows 地址，后面将它作为代理主机地址。
+
 在 Ubuntu 控制台执行：
 
 ```bash

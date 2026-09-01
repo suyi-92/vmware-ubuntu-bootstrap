@@ -34,6 +34,8 @@ export VUB_BACKUP_ROOT="$FIXTURE_ROOT/backups"
 export SSH_CONNECTION="192.0.2.10 50000 192.0.2.20 22"
 
 bash "$ROOT/scripts/04-static-network.sh" >/dev/null
+status=""
+detail=""
 # shellcheck disable=SC1090
 source "$VUB_STATE_DIR/static-network.state"
 [[ "$status" == "deferred" ]]

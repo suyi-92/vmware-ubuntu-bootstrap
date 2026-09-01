@@ -14,6 +14,16 @@ if (!(Test-Path "$env:USERPROFILE\.ssh\id_ed25519")) {
 Get-Content "$env:USERPROFILE\.ssh\id_ed25519.pub"
 ```
 
+查看 Windows 当前联网网卡的局域网 IPv4：
+
+```powershell
+Get-NetIPConfiguration |
+    Where-Object { $_.NetAdapter.Status -eq 'Up' -and $_.IPv4DefaultGateway -ne $null } |
+    Select-Object InterfaceAlias, @{Name='IPv4'; Expression={$_.IPv4Address.IPAddress}}
+```
+
+多条结果中选择与 Ubuntu 桥接地址同网段的 `Wi-Fi` 或 `Ethernet` 地址，并把它用于后续 `PROXY_URL`。
+
 ## 2. 在 Ubuntu 控制台开启临时 SSH
 
 新系统尚不能和 Windows 复制粘贴，只在 VMware 控制台输入以下短命令：
