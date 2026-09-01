@@ -10,9 +10,11 @@ done < <(find "$ROOT" -type f -name '*.sh' -print0)
 python3 -m compileall -q "$ROOT/scripts" "$ROOT/tests"
 python3 -m unittest discover -s "$ROOT/tests" -p 'test_*.py' -v
 bash "$ROOT/tests/test_input_validation.sh"
+bash "$ROOT/tests/test_remote_install_entry.sh"
 bash "$ROOT/tests/test_backup_rollback.sh"
 bash "$ROOT/tests/test_status_read_only.sh"
 bash "$ROOT/tests/test_preflight_dry_run.sh"
+bash "$ROOT/tests/test_static_network_ssh_deferred.sh"
 bash "$ROOT/install.sh" --help >/dev/null
 bash "$ROOT/bootstrap.sh" --help >/dev/null
 

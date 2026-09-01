@@ -64,6 +64,7 @@ if is_true "$DISABLE_SSH_PASSWORD"; then
 fi
 
 SSHD_DROPIN="/etc/ssh/sshd_config.d/00-vmware-ubuntu-bootstrap.conf"
+SSH_SOCKET_DROPIN="/etc/systemd/system/ssh.socket.d/00-vmware-ubuntu-bootstrap.conf"
 grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf([[:space:]]|$)' /etc/ssh/sshd_config \
   || die "/etc/ssh/sshd_config 未启用 sshd_config.d；拒绝写入不会生效的 drop-in。"
 SSHD_TMP="$(mktemp)"
@@ -83,10 +84,16 @@ if ! is_dry_run; then
 fi
 
 if is_true "$SSH_SOCKET_MODE"; then
+  render_template "$VUB_PROJECT_DIR/templates/ssh-socket.conf.tpl" \
+    "SSH_PORT=$SSH_PORT" | write_managed_file "$SSH_SOCKET_DROPIN" 0644 root root
   run systemctl daemon-reload
   run systemctl enable --now ssh.socket
   run systemctl restart ssh.socket
 else
+  if [[ -e "$SSH_SOCKET_DROPIN" || -L "$SSH_SOCKET_DROPIN" ]]; then
+    remove_managed_path "$SSH_SOCKET_DROPIN"
+    run systemctl daemon-reload
+  fi
   SSH_SERVICE="ssh"
   systemctl list-unit-files ssh.service 2>/dev/null | grep -q '^ssh\.service' || SSH_SERVICE="sshd"
   run systemctl enable --now "$SSH_SERVICE"
@@ -116,5 +123,5 @@ fi
 
 complete_backup
 mark_phase complete "ssh_port=$SSH_PORT;ufw=$ENABLE_UFW;password_disabled=$DISABLE_SSH_PASSWORD"
-TARGET_IP="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
+TARGET_IP="$(current_ipv4 "$NETWORK_INTERFACE")"
 info "SSH 配置完成。请从 Windows 验证：ssh -p $SSH_PORT $REAL_USER@$TARGET_IP"

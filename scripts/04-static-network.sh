@@ -16,16 +16,18 @@ if ! is_true "$CONFIGURE_STATIC_NETWORK"; then
   exit 0
 fi
 
+if [[ -n "${SSH_CONNECTION:-}" ]] && ! is_true "$ALLOW_SSH_NETWORK_CHANGE"; then
+  mark_phase deferred "requires VMware console"
+  warn "当前通过 SSH 操作，已安全延后固定网络；请稍后在 VMware 控制台执行：sudo bash install.sh --phase static-network"
+  exit 0
+fi
+
 require_command ip
 require_command python3
 require_command netplan
 
 [[ -n "$NETWORK_INTERFACE" ]] || NETWORK_INTERFACE="$(current_interface)"
 ip link show dev "$NETWORK_INTERFACE" >/dev/null 2>&1 || die "网卡不存在：$NETWORK_INTERFACE"
-
-if [[ -n "${SSH_CONNECTION:-}" ]] && ! is_true "$ALLOW_SSH_NETWORK_CHANGE"; then
-  die "当前仅通过 SSH 操作；为防断联，必须在 VMware 控制台执行或设置 ALLOW_SSH_NETWORK_CHANGE=true。"
-fi
 
 TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
 NORMALIZED="$(python3 - "$TARGET_IPV4" "$PREFIX_LENGTH" "$GATEWAY_IPV4" "$DNS_SERVERS" <<'PY'

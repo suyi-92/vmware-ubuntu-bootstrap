@@ -58,4 +58,10 @@ if (validate_config >/dev/null 2>&1); then
   fail "unsafe interface name was accepted"
 fi
 
+SOCKET_RENDERED="$(render_template "$ROOT/templates/ssh-socket.conf.tpl" "SSH_PORT=2222")"
+grep -Fxq 'ListenStream=' <<<"$SOCKET_RENDERED" \
+  || fail "SSH socket template does not reset the vendor listener"
+grep -Fxq 'ListenStream=2222' <<<"$SOCKET_RENDERED" \
+  || fail "SSH socket template does not apply the selected port"
+
 echo "input validation: PASS"

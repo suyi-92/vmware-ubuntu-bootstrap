@@ -51,7 +51,8 @@ pgrep -a -u "$USER" -x vmtoolsd | grep -- '-n vmusr'
 
 ```bash
 sudo /usr/sbin/sshd -t
-systemctl is-active ssh
+systemctl is-active ssh.socket 2>/dev/null || systemctl is-active ssh
+ss -ltn | grep ':22 '
 ```
 
 从 Windows 新开 PowerShell：
@@ -59,6 +60,8 @@ systemctl is-active ssh
 ```powershell
 ssh -p 22 suyi@192.168.1.254
 ```
+
+端口、用户和地址以实际配置为准。固定网络仍为 `deferred` 时，先使用当前 DHCP 地址；在 VMware 控制台完成固定网络阶段后再改用固定地址。
 
 ## Codex / CPA
 

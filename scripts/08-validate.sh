@@ -59,12 +59,19 @@ EXPECTED_PROXY="${http_proxy:-}"
   || die "root Git 代理验收失败。"
 apt-config dump 2>/dev/null | grep -Fq "$EXPECTED_PROXY" || die "APT 代理验收失败。"
 
+NETWORK_DEFERRED="false"
 if is_true "$CONFIGURE_STATIC_NETWORK"; then
-  TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
-  ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
-    || die "固定 IPv4 验收失败。"
-  ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关验收失败。"
-  getent hosts github.com >/dev/null 2>&1 || die "DNS 验收失败。"
+  STATIC_NETWORK_STATUS="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
+  if [[ "$STATIC_NETWORK_STATUS" == "deferred" ]]; then
+    NETWORK_DEFERRED="true"
+    warn "固定网络尚未执行，将保留为待 VMware 控制台完成状态。"
+  else
+    TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
+    ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
+      || die "固定 IPv4 验收失败。"
+    ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关验收失败。"
+    getent hosts github.com >/dev/null 2>&1 || die "DNS 验收失败。"
+  fi
 fi
 
 for target in sleep.target suspend.target hibernate.target hybrid-sleep.target; do
@@ -121,7 +128,9 @@ PY
 fi
 
 FINAL_STATUS="configured-pending-reboot"
-if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
+if is_true "$NETWORK_DEFERRED"; then
+  FINAL_STATUS="configured-pending-console"
+elif [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
   MARKER_MTIME="$(stat -c %Y "$VUB_STATE_DIR/reboot-required")"
   BOOT_TIME="$(awk '$1 == "btime" {print $2}' /proc/stat)"
   if [[ "$BOOT_TIME" =~ ^[0-9]+$ && "$BOOT_TIME" -gt "$MARKER_MTIME" ]]; then
@@ -135,6 +144,8 @@ fi
 mark_phase "$FINAL_STATUS" "all checks passed"
 if [[ "$FINAL_STATUS" == "complete" ]]; then
   info "全部验收通过。"
+elif [[ "$FINAL_STATUS" == "configured-pending-console" ]]; then
+  warn "其余配置验收通过；请在 VMware 控制台执行固定网络阶段，然后重启复验。"
 else
   warn "配置验收通过，但仍需重启后再次运行：sudo bash install.sh --phase validate"
 fi

@@ -32,3 +32,6 @@ jobs:
 
       - name: Run root preflight in dry-run mode
         run: sudo bash tests/test_preflight_dry_run.sh
+
+      - name: Verify static network defers safely over SSH
+        run: sudo bash tests/test_static_network_ssh_deferred.sh

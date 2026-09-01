@@ -49,7 +49,9 @@ ip -4 route
 ```bash
 sudo /usr/sbin/sshd -t
 sudo rm -f /etc/ssh/sshd_config.d/00-vmware-ubuntu-bootstrap.conf
-sudo systemctl restart ssh
+sudo rm -f /etc/systemd/system/ssh.socket.d/00-vmware-ubuntu-bootstrap.conf
+sudo systemctl daemon-reload
+sudo systemctl restart ssh.socket 2>/dev/null || sudo systemctl restart ssh
 ```
 
 优先使用项目回滚命令；上面的手动命令只用于回滚入口本身不可用时。

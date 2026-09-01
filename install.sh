@@ -2,6 +2,87 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+
+remote_bootstrap() {
+  local official_url="https://github.com/suyi-92/vmware-ubuntu-bootstrap.git"
+  local repository_url="${VUB_REPOSITORY_URL:-$official_url}"
+  local install_dir="${VUB_INSTALL_DIR:-$HOME/vmware-ubuntu-bootstrap}"
+  local origin branch stage_dir=""
+
+  if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+    printf '请以普通 Ubuntu 用户运行远程一键命令；安装器会在需要时自行调用 sudo。\n' >&2
+    exit 1
+  fi
+  [[ "$install_dir" == "$HOME/"* && "$install_dir" != "$HOME" ]] || {
+    printf 'VUB_INSTALL_DIR 必须是用户主目录下的独立绝对路径。\n' >&2
+    exit 1
+  }
+  command -v sudo >/dev/null 2>&1 || {
+    printf '缺少 sudo，无法安装启动依赖。\n' >&2
+    exit 1
+  }
+
+  if ! command -v git >/dev/null 2>&1; then
+    command -v apt-get >/dev/null 2>&1 || {
+      printf '缺少 git 和 apt-get，无法下载完整项目。\n' >&2
+      exit 1
+    }
+    printf '正在安装远程启动所需的 git...\n'
+    sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
+      env DEBIAN_FRONTEND=noninteractive apt-get update
+    sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY \
+      env DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates
+  fi
+
+  if [[ -e "$install_dir" ]]; then
+    [[ -d "$install_dir/.git" ]] || {
+      printf '安装目录已存在但不是 Git 仓库：%s\n' "$install_dir" >&2
+      exit 1
+    }
+    origin="$(git -C "$install_dir" remote get-url origin 2>/dev/null || true)"
+    if [[ "$repository_url" == "$official_url" ]]; then
+      case "$origin" in
+        "$official_url"|https://github.com/suyi-92/vmware-ubuntu-bootstrap|git@github.com:suyi-92/vmware-ubuntu-bootstrap.git) ;;
+        *) printf '安装目录的 origin 不是本项目仓库：%s\n' "$origin" >&2; exit 1 ;;
+      esac
+    elif [[ "$origin" != "$repository_url" ]]; then
+      printf '安装目录的 origin 与 VUB_REPOSITORY_URL 不一致。\n' >&2
+      exit 1
+    fi
+    [[ -z "$(git -C "$install_dir" status --porcelain --untracked-files=all)" ]] || {
+      printf '安装目录存在本地修改，请先处理后再运行一键命令：%s\n' "$install_dir" >&2
+      exit 1
+    }
+    branch="$(git -C "$install_dir" branch --show-current)"
+    [[ "$branch" == "main" ]] || {
+      printf '安装目录当前分支不是 main：%s\n' "$branch" >&2
+      exit 1
+    }
+    git -C "$install_dir" pull --ff-only origin main
+  else
+    mkdir -p -- "$(dirname -- "$install_dir")"
+    stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/vmware-ubuntu-bootstrap.XXXXXX")"
+    cleanup_remote_stage() {
+      if [[ -n "${stage_dir:-}" && -d "$stage_dir" ]]; then
+        rm -rf -- "$stage_dir"
+      fi
+    }
+    trap cleanup_remote_stage EXIT
+    git clone --depth 1 --branch main -- "$repository_url" "$stage_dir/repository"
+    mv -- "$stage_dir/repository" "$install_dir"
+    rmdir -- "$stage_dir"
+    stage_dir=""
+    trap - EXIT
+  fi
+
+  printf '项目已准备到：%s\n' "$install_dir"
+  exec bash "$install_dir/install.sh" "$@"
+}
+
+if [[ ! -r "$PROJECT_DIR/scripts/00-lib.sh" ]]; then
+  remote_bootstrap "$@"
+fi
+
 # shellcheck source=scripts/00-lib.sh
 source "$PROJECT_DIR/scripts/00-lib.sh"
 
