@@ -51,7 +51,12 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("ui_info", install_script)
         self.assertIn('ui_section "基础信息"', install_script)
         self.assertIn('read_default "CPA /v1 地址，公网必须 HTTPS"', install_script)
-        self.assertIn('read -e -i "$default_value"', shell_library)
+        self.assertIn(
+            'read -e -i "$default_value" -r -p "${prompt}："', shell_library
+        )
+        self.assertIn(
+            'read -e -i "$default_input" -r -p "${prompt}："', shell_library
+        )
         self.assertNotIn("[默认:", shell_library)
 
     def test_runtime_and_secret_files_are_ignored(self) -> None:

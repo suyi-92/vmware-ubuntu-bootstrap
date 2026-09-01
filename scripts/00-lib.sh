@@ -221,10 +221,14 @@ init_input_tty() {
 read_default() {
   local prompt="$1" default_value="${2:-}" value=""
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
-  printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
-  if [[ -n "$default_value" && "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
-    IFS= read -e -i "$default_value" -r value <"$VUB_INPUT_TTY" || true
+  if [[ "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
+    if [[ -n "$default_value" ]]; then
+      IFS= read -e -i "$default_value" -r -p "${prompt}：" value <"$VUB_INPUT_TTY" || true
+    else
+      IFS= read -e -r -p "${prompt}：" value <"$VUB_INPUT_TTY" || true
+    fi
   else
+    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
     IFS= read -r value <"$VUB_INPUT_TTY" || true
   fi
   printf '%s\n' "${value:-$default_value}"
@@ -254,10 +258,10 @@ read_yes_no() {
   esac
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
   while true; do
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
     if [[ "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
-      IFS= read -e -i "$default_input" -r value <"$VUB_INPUT_TTY" || true
+      IFS= read -e -i "$default_input" -r -p "${prompt}：" value <"$VUB_INPUT_TTY" || true
     else
+      printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
       IFS= read -r value <"$VUB_INPUT_TTY" || true
     fi
     if [[ -z "$value" ]]; then
