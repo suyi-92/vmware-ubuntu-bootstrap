@@ -235,15 +235,18 @@ read_default() {
 }
 
 read_secret() {
-  local prompt="$1" has_existing="${2:-false}" value="" character=""
+  local prompt="$1" has_existing="${2:-false}" value="" character="" tty_state=""
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
-  if is_true "$has_existing"; then
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}（已配置，直接回车保留）：" >"$VUB_INPUT_TTY"
-  else
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
-  fi
   if [[ "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
-    while IFS= read -r -s -n 1 character <"$VUB_INPUT_TTY"; do
+    tty_state="$(stty -g <"$VUB_INPUT_TTY")" || die "无法读取终端状态。"
+    stty -echo <"$VUB_INPUT_TTY" || die "无法关闭敏感输入回显。"
+    trap 'stty "$tty_state" <"$VUB_INPUT_TTY" 2>/dev/null || true; exit 130' HUP INT TERM
+    if is_true "$has_existing"; then
+      printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}（已配置，直接回车保留）：" >"$VUB_INPUT_TTY"
+    else
+      printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
+    fi
+    while IFS= read -r -n 1 character <"$VUB_INPUT_TTY"; do
       [[ -n "$character" ]] || break
       case "$character" in
         $'\177'|$'\b')
@@ -264,7 +267,14 @@ read_secret() {
           ;;
       esac
     done
+    stty "$tty_state" <"$VUB_INPUT_TTY" 2>/dev/null || true
+    trap - HUP INT TERM
   else
+    if is_true "$has_existing"; then
+      printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}（已配置，直接回车保留）：" >"$VUB_INPUT_TTY"
+    else
+      printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
+    fi
     stty -echo <"$VUB_INPUT_TTY" 2>/dev/null || true
     IFS= read -r value <"$VUB_INPUT_TTY" || true
     stty echo <"$VUB_INPUT_TTY" 2>/dev/null || true

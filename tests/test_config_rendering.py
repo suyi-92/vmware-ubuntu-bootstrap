@@ -66,6 +66,8 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn(
             'read -e -i "$default_input" -r -p "${prompt}："', shell_library
         )
+        self.assertIn('stty -echo <"$VUB_INPUT_TTY"', shell_library)
+        self.assertNotIn("read -r -s -n 1", shell_library)
         self.assertIn("printf '*'", shell_library)
         self.assertNotIn("[默认:", shell_library)
 

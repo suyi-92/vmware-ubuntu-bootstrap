@@ -150,7 +150,7 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY bash install.s
 | Codex/CPA | 配置 | 可在交互中选择跳过 |
 | Docker | 不安装 | 可在交互中选择安装 |
 
-CPA API key 使用无回显输入，保存到用户目录下权限为 `600` 的凭据文件，不写入 TOML、日志或 Git。
+CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存到用户目录下权限为 `600` 的文件，不写入 TOML、日志或 Git。
 公网 CPA 地址必须使用 HTTPS，避免 API key 在网络中明文传输；HTTP 只允许回环地址、`.local` 或明确的私有局域网 IP。
 安装器会使用 API key 请求 CPA `/v1/models`：只有一个模型时自动选择；有多个模型时显示编号列表，并优先把上次使用的模型作为默认选项。接口通常不提供模型质量排名，因此安装器不会擅自宣称某个模型“最好”。
 模型检测会先沿用当前代理；如果代理返回拒绝而直连成功，脚本会自动把该 CPA 主机加入 `NO_PROXY`，后续 CPA 和 Codex 请求保持同一条可用路径。
