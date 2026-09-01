@@ -35,8 +35,8 @@ AVAILABLE_KB="$(df -Pk / | awk 'NR==2 {print $4}')"
 [[ "$AVAILABLE_KB" =~ ^[0-9]+$ ]] || die "无法读取根文件系统剩余空间。"
 (( AVAILABLE_KB >= 1048576 )) || die "根文件系统剩余空间不足 1 GiB。"
 
-if [[ -n "${SSH_CONNECTION:-}" ]] && is_true "$CONFIGURE_STATIC_NETWORK" && ! is_true "$ALLOW_SSH_NETWORK_CHANGE"; then
-  warn "当前会话来自 SSH；固定网络将安全延后，其他阶段继续执行。"
+if [[ -n "${SSH_CONNECTION:-}" ]] && is_true "$CONFIGURE_STATIC_NETWORK"; then
+  warn "当前会话来自 SSH；固定网络配置将写入磁盘并在重启时生效，当前连接不会中断。"
 fi
 
 info "系统：${PRETTY_NAME}"

@@ -25,11 +25,12 @@ load_proxy_state || warn "没有持久化代理状态；Codex 安装将使用当
 USER_CONFIG_ROOT="$REAL_HOME/.config/vmware-ubuntu-bootstrap"
 SECRET_DIR="$USER_CONFIG_ROOT/secrets"
 KEY_FILE="$SECRET_DIR/cpa-api-key"
-TOKEN_HELPER="$REAL_HOME/.local/libexec/codex-cpa-token"
+TOKEN_HELPER="$REAL_HOME/.local/libexec/vmware-ubuntu-bootstrap-codex-token"
 CODEX_DIR="$REAL_HOME/.codex"
-CPA_PROFILE="$CODEX_DIR/cpa.config.toml"
 MAIN_CONFIG="$CODEX_DIR/config.toml"
-CODEX_WRAPPER="$REAL_HOME/.local/bin/codex-cpa"
+LEGACY_PROFILE="$CODEX_DIR/cpa.config.toml"
+LEGACY_WRAPPER="$REAL_HOME/.local/bin/codex-cpa"
+LEGACY_TOKEN_HELPER="$REAL_HOME/.local/libexec/codex-cpa-token"
 
 if [[ -n "${VUB_CPA_API_KEY_FILE:-}" ]]; then
   [[ -f "$VUB_CPA_API_KEY_FILE" && -r "$VUB_CPA_API_KEY_FILE" ]] \
@@ -77,7 +78,7 @@ if [[ ! -x "$CODEX_BIN" ]]; then
     backup_path "$REAL_HOME/.local/bin/codex-code-mode-host"
     backup_path "$REAL_HOME/.codex/packages/standalone"
     INSTALLER_TMP="$(mktemp)"
-    trap 'rm -f "${INSTALLER_TMP:-}" "${PROFILE_TMP:-}"' EXIT
+    trap 'rm -f "${INSTALLER_TMP:-}" "${CONFIG_TMP:-}"' EXIT
     curl -fsSL --connect-timeout 10 --max-time 120 https://chatgpt.com/codex/install.sh -o "$INSTALLER_TMP"
     [[ -s "$INSTALLER_TMP" ]] || die "Codex 官方安装脚本下载为空。"
     head -n 1 "$INSTALLER_TMP" | grep -Eq '^#!' || die "Codex 安装脚本缺少 shebang。"
@@ -91,28 +92,21 @@ else
   info "检测到 Codex：$CODEX_BIN"
 fi
 
-PROFILE_TMP="$(mktemp)"
+CONFIG_TMP="$(mktemp)"
 python3 "$SCRIPT_DIR/render_codex_config.py" \
-  --model "$CPA_MODEL_ID" --base-url "$CPA_BASE_URL" --token-helper "$TOKEN_HELPER" >"$PROFILE_TMP"
-write_user_file "$CPA_PROFILE" 0600 <"$PROFILE_TMP"
-
-if [[ ! -e "$MAIN_CONFIG" ]] || grep -Fq '# Managed by vmware-ubuntu-bootstrap.' "$MAIN_CONFIG" 2>/dev/null; then
-  write_user_file "$MAIN_CONFIG" 0600 <"$PROFILE_TMP"
-else
-  info "保留现有 $MAIN_CONFIG；CPA 配置写入独立 profile cpa。"
+  --model "$CPA_MODEL_ID" --base-url "$CPA_BASE_URL" --token-helper "$TOKEN_HELPER" >"$CONFIG_TMP"
+if [[ -e "$MAIN_CONFIG" ]] && ! grep -Fq '# Managed by vmware-ubuntu-bootstrap.' "$MAIN_CONFIG" 2>/dev/null; then
+  warn "现有 $MAIN_CONFIG 将备份后由本项目接管，使标准 codex 命令默认使用 CPA。"
 fi
-rm -f "$PROFILE_TMP"
+write_user_file "$MAIN_CONFIG" 0600 <"$CONFIG_TMP"
+rm -f "$CONFIG_TMP"
 
-{
-  cat <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-exec $(shell_quote "$CODEX_BIN") --profile cpa "\$@"
-EOF
-} | write_user_file "$CODEX_WRAPPER" 0755
+remove_managed_path "$LEGACY_PROFILE"
+remove_managed_path "$LEGACY_WRAPPER"
+remove_managed_path "$LEGACY_TOKEN_HELPER"
 
 if ! is_dry_run; then
-  run_as_user python3 - "$CPA_PROFILE" <<'PY'
+  run_as_user python3 - "$MAIN_CONFIG" <<'PY'
 import pathlib
 import sys
 import tomllib
@@ -135,11 +129,11 @@ PY
   run_as_user "$CODEX_BIN" --version
   if is_true "$RUN_CODEX_SMOKE"; then
     warn "执行一次最小 codex exec 请求，可能产生少量 API 费用。"
-    run_as_user timeout 120 "$CODEX_WRAPPER" exec --skip-git-repo-check \
+    run_as_user timeout 120 "$CODEX_BIN" exec --skip-git-repo-check \
       "Reply exactly OK." >/dev/null
   fi
 fi
 
 complete_backup
-mark_phase complete "provider=cpa;model=$CPA_MODEL_ID;profile=$CPA_PROFILE"
-info "Codex/CPA 配置完成。可运行：codex-cpa"
+mark_phase complete "provider=cpa;model=$CPA_MODEL_ID;config=$MAIN_CONFIG"
+info "Codex/CPA 配置完成。请直接运行：codex"

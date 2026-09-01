@@ -107,18 +107,31 @@ for raw_path in (root_path, user_path):
 PY
 fi
 
-NETWORK_DEFERRED="false"
+REBOOT_PENDING_FOR_CURRENT_BOOT="false"
+REBOOT_OCCURRED_AFTER_MARKER="false"
+if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
+  MARKER_MTIME="$(stat -c %Y "$VUB_STATE_DIR/reboot-required")"
+  BOOT_TIME="$(awk '$1 == "btime" {print $2}' /proc/stat)"
+  if [[ "$BOOT_TIME" =~ ^[0-9]+$ && "$MARKER_MTIME" =~ ^[0-9]+$ && "$BOOT_TIME" -gt "$MARKER_MTIME" ]]; then
+    REBOOT_OCCURRED_AFTER_MARKER="true"
+  else
+    REBOOT_PENDING_FOR_CURRENT_BOOT="true"
+  fi
+fi
+
 if is_true "$CONFIGURE_STATIC_NETWORK"; then
   STATIC_NETWORK_STATUS="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
-  if [[ "$STATIC_NETWORK_STATUS" == "deferred" ]]; then
-    NETWORK_DEFERRED="true"
-    warn "固定网络尚未执行，将保留为待 VMware 控制台完成状态。"
+  if [[ "$STATIC_NETWORK_STATUS" == "pending-reboot" ]] && is_true "$REBOOT_PENDING_FOR_CURRENT_BOOT"; then
+    warn "固定网络已写入磁盘；当前 SSH 地址保持不变，重启后切换到 ${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}/${PREFIX_LENGTH}。"
   else
     TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
     ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
       || die "固定 IPv4 验收失败。"
     ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关验收失败。"
     getent hosts github.com >/dev/null 2>&1 || die "DNS 验收失败。"
+    if [[ "$STATIC_NETWORK_STATUS" == "pending-reboot" ]]; then
+      mark_named_phase static-network complete "ip=${TARGET_IPV4}/${PREFIX_LENGTH};gateway=$GATEWAY_IPV4;activated-after-reboot"
+    fi
   fi
 fi
 
@@ -156,12 +169,16 @@ fi
 
 if is_true "$CONFIGURE_CODEX"; then
   KEY_FILE="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
-  PROFILE_FILE="$REAL_HOME/.codex/cpa.config.toml"
-  WRAPPER="$REAL_HOME/.local/bin/codex-cpa"
-  [[ -s "$KEY_FILE" && -x "$WRAPPER" && -s "$PROFILE_FILE" ]] || die "Codex/CPA 文件不完整。"
+  CODEX_CONFIG="$REAL_HOME/.codex/config.toml"
+  CODEX_BIN="$REAL_HOME/.local/bin/codex"
+  [[ -x "$CODEX_BIN" ]] || CODEX_BIN="$REAL_HOME/.codex/bin/codex"
+  if [[ ! -x "$CODEX_BIN" ]]; then
+    CODEX_BIN="$(run_as_user bash -c 'command -v codex || true')"
+  fi
+  [[ -s "$KEY_FILE" && -x "$CODEX_BIN" && -s "$CODEX_CONFIG" ]] || die "Codex/CPA 文件不完整。"
   [[ "$(stat -c '%U:%G:%a' "$KEY_FILE")" == "$REAL_USER:$REAL_GROUP:600" ]] \
     || die "CPA key 权限验收失败。"
-  run_as_user python3 - "$PROFILE_FILE" <<'PY'
+  run_as_user python3 - "$CODEX_CONFIG" <<'PY'
 import pathlib
 import sys
 import tomllib
@@ -172,18 +189,14 @@ assert data["model_providers"]["cpa"]["wire_api"] == "responses"
 PY
   run_as_user python3 "$SCRIPT_DIR/cpa_client.py" models \
     --base-url "$CPA_BASE_URL" --key-file "$KEY_FILE" --model "$CPA_MODEL_ID"
-  run_as_user "$WRAPPER" --version >/dev/null
+  run_as_user "$CODEX_BIN" --version >/dev/null
   python3 "$SCRIPT_DIR/secret_guard.py" --secret-file "$KEY_FILE" \
     "$VUB_PROJECT_DIR" "$VUB_LOG_DIR" || die "API key 泄漏到仓库或日志。"
 fi
 
 FINAL_STATUS="configured-pending-reboot"
-if is_true "$NETWORK_DEFERRED"; then
-  FINAL_STATUS="configured-pending-console"
-elif [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
-  MARKER_MTIME="$(stat -c %Y "$VUB_STATE_DIR/reboot-required")"
-  BOOT_TIME="$(awk '$1 == "btime" {print $2}' /proc/stat)"
-  if [[ "$BOOT_TIME" =~ ^[0-9]+$ && "$BOOT_TIME" -gt "$MARKER_MTIME" ]]; then
+if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
+  if is_true "$REBOOT_OCCURRED_AFTER_MARKER"; then
     clear_reboot_required
     FINAL_STATUS="complete"
   fi
@@ -194,8 +207,9 @@ fi
 mark_phase "$FINAL_STATUS" "all checks passed"
 if [[ "$FINAL_STATUS" == "complete" ]]; then
   info "全部验收通过。"
-elif [[ "$FINAL_STATUS" == "configured-pending-console" ]]; then
-  warn "其余配置验收通过；请在 VMware 控制台执行固定网络阶段，然后重启复验。"
 else
   warn "配置验收通过，但仍需重启后再次运行：sudo bash install.sh --phase validate"
+  if is_true "$CONFIGURE_STATIC_NETWORK"; then
+    info "重启后请从 Windows 连接：ssh -p $SSH_PORT $REAL_USER@${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
+  fi
 fi

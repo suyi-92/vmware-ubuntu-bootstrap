@@ -116,14 +116,13 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 远程入口会先安装缺失的 Git、curl、Python、证书或网络基础命令，把仓库克隆或快进更新到 `~/vmware-ubuntu-bootstrap`，再启动仓库内的交互安装器。请以普通 Ubuntu 用户运行这条命令，不要在前面添加 `sudo`；安装器会在需要时自行提权。
 
-通过 SSH 运行时，脚本会安全延后固定 IP 阶段，继续完成代理、软件包、桌面集成、SSH、Codex 等配置。之后回到 VMware 控制台执行：
+通过 SSH 运行时，脚本会校验目标地址并写入 Netplan，但不会立即切断当前 DHCP SSH 连接；固定地址会在重启时生效，不需要再回 VMware 控制台执行网络阶段。完整安装结束后运行：
 
 ```bash
-cd ~/vmware-ubuntu-bootstrap
-sudo bash install.sh --phase static-network
+sudo reboot
 ```
 
-确认 `netplan try` 后，后续 SSH 应使用新的固定地址。
+SSH 会正常断开。虚拟机启动后，使用安装器最后显示的新固定地址重新连接。直接在 VMware 控制台执行网络阶段时，仍使用 `netplan try --timeout 120` 立即切换并提供自动回滚保护。
 
 ### 克隆后再运行
 
@@ -155,6 +154,7 @@ CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存
 公网 CPA 地址必须使用 HTTPS，避免 API key 在网络中明文传输；HTTP 只允许回环地址、`.local` 或明确的私有局域网 IP。
 安装器会使用 API key 请求 CPA `/v1/models`：只有一个模型时自动选择；有多个模型时显示编号列表，并优先把上次使用的模型作为默认选项。接口通常不提供模型质量排名，因此安装器不会擅自宣称某个模型“最好”。
 模型检测会先沿用当前代理；如果代理返回拒绝而直连成功，脚本会自动把该 CPA 主机加入 `NO_PROXY`，后续 CPA 和 Codex 请求保持同一条可用路径。
+CPA Provider 会直接写入当前用户的 `~/.codex/config.toml`，安装完成后使用标准命令 `codex`；项目不要求额外的包装命令。
 
 Docker Engine 默认安装，包含 Docker daemon、CLI、用户组和代理配置；如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW 与关闭 SSH 密码登录在各自配置分类中独立选择。
 
@@ -178,7 +178,7 @@ Docker Engine 默认安装，包含 Docker daemon、CLI、用户组和代理配�
 ssh -p 22 suyi@192.168.1.254
 ```
 
-请替换为安装时选择的端口、用户和最终 IPv4。如果固定网络阶段因 SSH 会话被延后，应先使用当前 DHCP 地址，完成控制台固定网络阶段后再切换到固定地址。
+请替换为安装时选择的端口、用户和最终 IPv4。在首次 SSH 安装尚未重启时，当前会话仍使用 DHCP 地址；重启后改用安装器显示的固定地址。
 
 ## 8. 完成安装与验证
 
@@ -196,7 +196,7 @@ sudo bash install.sh --phase validate
 sudo bash install.sh --status
 ```
 
-只有固定网络不再处于延后状态，并且重启后的全部检查通过，最终状态才会成为 `complete`。
+SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启后固定地址、Docker 用户权限和其余检查全部通过，最终状态才会成为 `complete`。
 
 ## 9. 常用命令
 

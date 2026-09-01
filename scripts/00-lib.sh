@@ -368,7 +368,6 @@ apply_config_defaults() {
   : "${PREFIX_LENGTH:=24}"
   : "${GATEWAY_IPV4:=}"
   : "${DNS_SERVERS:=}"
-  : "${ALLOW_SSH_NETWORK_CHANGE:=false}"
   : "${HOSTNAME:=}"
   : "${TIMEZONE:=America/New_York}"
   : "${SSH_PORT:=22}"
@@ -449,7 +448,6 @@ validate_config() {
   validate_port PROXY_PORT
   validate_port SSH_PORT
   validate_bool CONFIGURE_STATIC_NETWORK
-  validate_bool ALLOW_SSH_NETWORK_CHANGE
   validate_bool ENABLE_UFW
   validate_bool DISABLE_SSH_PASSWORD
   validate_bool CONFIRM_SSH_KEY_LOGIN
@@ -543,20 +541,25 @@ start_phase() {
   info "开始阶段：$VUB_PHASE_NAME"
 }
 
-mark_phase() {
-  local status="$1" detail="${2:-}"
+mark_named_phase() {
+  local phase="$1" status="$2" detail="${3:-}"
+  [[ "$phase" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "阶段名称不安全：$phase"
   if is_dry_run; then
-    info "DRY-RUN: phase $VUB_PHASE_NAME -> $status"
+    info "DRY-RUN: phase $phase -> $status"
     return 0
   fi
   init_runtime_dirs
   {
-    printf 'phase=%q\n' "$VUB_PHASE_NAME"
+    printf 'phase=%q\n' "$phase"
     printf 'status=%q\n' "$status"
     printf 'date=%q\n' "$(_vub_timestamp)"
     printf 'detail=%q\n' "$detail"
-  } >"$VUB_STATE_DIR/${VUB_PHASE_NAME}.state"
-  chmod 0600 "$VUB_STATE_DIR/${VUB_PHASE_NAME}.state"
+  } >"$VUB_STATE_DIR/${phase}.state"
+  chmod 0600 "$VUB_STATE_DIR/${phase}.state"
+}
+
+mark_phase() {
+  mark_named_phase "$VUB_PHASE_NAME" "$@"
 }
 
 safe_backup_target() {

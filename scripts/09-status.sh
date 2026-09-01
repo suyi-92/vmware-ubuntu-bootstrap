@@ -38,6 +38,15 @@ iface="${NETWORK_INTERFACE:-$(current_interface)}"
 echo "interface: ${iface:-unknown}"
 echo "IPv4:     $(current_ipv4 "$iface" 2>/dev/null || echo unknown)"
 echo "gateway:  $(current_gateway 2>/dev/null || echo unknown)"
+if [[ -r "$VUB_CONFIG_FILE" ]] && is_true "$CONFIGURE_STATIC_NETWORK"; then
+  static_status="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
+  echo "target:   ${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}/${PREFIX_LENGTH}"
+  if [[ "$static_status" == "pending-reboot" ]]; then
+    echo "switch:   after reboot"
+  else
+    echo "switch:   ${static_status:-not configured}"
+  fi
+fi
 echo
 
 echo "=== Proxy ==="
@@ -95,9 +104,12 @@ echo "port: ${SSH_PORT:-22}"
 echo
 
 echo "=== Codex / CPA ==="
-if [[ -x "$REAL_HOME/.local/bin/codex-cpa" ]]; then
-  echo "wrapper: $REAL_HOME/.local/bin/codex-cpa"
-  echo "profile: $REAL_HOME/.codex/cpa.config.toml"
+codex_bin="$REAL_HOME/.local/bin/codex"
+[[ -x "$codex_bin" ]] || codex_bin="$REAL_HOME/.codex/bin/codex"
+if [[ -x "$codex_bin" && -s "$REAL_HOME/.codex/config.toml" ]]; then
+  echo "command:  codex"
+  echo "binary:   $codex_bin"
+  echo "config:   $REAL_HOME/.codex/config.toml"
   key_file="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
   [[ -f "$key_file" ]] && echo "key:     present ($(stat -c '%U:%G:%a' "$key_file"))" || echo "key:     missing"
 else

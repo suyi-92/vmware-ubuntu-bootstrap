@@ -70,14 +70,14 @@ ss -ltn6 | grep ':22 '
 ssh -p 22 suyi@192.168.1.254
 ```
 
-端口、用户和地址以实际配置为准。固定网络仍为 `deferred` 时，先使用当前 DHCP 地址；在 VMware 控制台完成固定网络阶段后再改用固定地址。
+端口、用户和地址以实际配置为准。SSH 一键安装结束但尚未重启时，原会话仍使用 DHCP 地址；执行 `sudo reboot` 后改用安装器显示的固定地址。
 
 ## Codex / CPA
 
 ```bash
 codex --version
-codex-cpa --version
+grep -E '^(model|model_provider|base_url|wire_api)' ~/.codex/config.toml
 stat -c '%U:%G:%a %n' ~/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key
 ```
 
-API key 文件必须为当前用户所有且权限为 `600`。不要把 key 或 Authorization header 粘贴到诊断日志。
+`model_provider` 应为 `cpa`，随后直接运行 `codex`。API key 文件必须为当前用户所有且权限为 `600`。不要把 key 或 Authorization header 粘贴到诊断日志。

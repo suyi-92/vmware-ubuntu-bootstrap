@@ -228,7 +228,6 @@ emit_config() {
   printf 'PREFIX_LENGTH=%s\n' "$(shell_quote "$PREFIX_LENGTH")"
   printf 'GATEWAY_IPV4=%s\n' "$(shell_quote "$GATEWAY_IPV4")"
   printf 'DNS_SERVERS=%s\n' "$(shell_quote "$DNS_SERVERS")"
-  printf 'ALLOW_SSH_NETWORK_CHANGE=%s\n' "$(shell_quote "$ALLOW_SSH_NETWORK_CHANGE")"
   printf 'HOSTNAME=%s\n' "$(shell_quote "$HOSTNAME")"
   printf 'TIMEZONE=%s\n' "$(shell_quote "$TIMEZONE")"
   printf 'SSH_PORT=%s\n' "$(shell_quote "$SSH_PORT")"

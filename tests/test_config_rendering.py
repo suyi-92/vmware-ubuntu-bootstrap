@@ -15,7 +15,7 @@ import secret_guard  # noqa: E402
 
 
 class ConfigRenderingTests(unittest.TestCase):
-    def test_codex_profile_is_valid_toml(self) -> None:
+    def test_codex_default_config_is_valid_toml(self) -> None:
         rendered = render_codex_config.render(
             "gpt-test/model", "https://cpa.example.com/v1", "/home/suyi/bin/token"
         )
@@ -28,6 +28,38 @@ class ConfigRenderingTests(unittest.TestCase):
             "/home/suyi/bin/token",
         )
         self.assertNotIn("experimental_bearer_token", rendered)
+
+    def test_plain_codex_is_the_managed_entrypoint(self) -> None:
+        codex_script = (ROOT / "scripts" / "07-codex.sh").read_text(
+            encoding="utf-8"
+        )
+        validate_script = (ROOT / "scripts" / "08-validate.sh").read_text(
+            encoding="utf-8"
+        )
+        status_script = (ROOT / "scripts" / "09-status.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('MAIN_CONFIG="$CODEX_DIR/config.toml"', codex_script)
+        self.assertIn('write_user_file "$MAIN_CONFIG" 0600', codex_script)
+        self.assertIn('run_as_user timeout 120 "$CODEX_BIN" exec', codex_script)
+        self.assertIn("请直接运行：codex", codex_script)
+        self.assertNotIn("CODEX_WRAPPER", codex_script)
+        self.assertNotIn('exec $(shell_quote "$CODEX_BIN") --profile', codex_script)
+        self.assertIn('CODEX_CONFIG="$REAL_HOME/.codex/config.toml"', validate_script)
+        self.assertIn('echo "command:  codex"', status_script)
+
+    def test_ssh_network_is_staged_for_reboot(self) -> None:
+        static_network = (ROOT / "scripts" / "04-static-network.sh").read_text(
+            encoding="utf-8"
+        )
+        preflight = (ROOT / "scripts" / "01-preflight.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('SSH_ACTIVATION_ON_REBOOT="true"', static_network)
+        self.assertIn("mark_phase pending-reboot", static_network)
+        self.assertIn("重启后请从 Windows 连接", static_network)
+        self.assertNotIn("requires VMware console", static_network)
+        self.assertNotIn("固定网络将安全延后", preflight)
 
     def test_toml_strings_are_escaped(self) -> None:
         rendered = render_codex_config.render(

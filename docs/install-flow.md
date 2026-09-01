@@ -68,16 +68,15 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 ## 4. 从 SSH 安装时的固定网络处理
 
-通过 SSH 运行完整安装时，固定网络阶段会标记为 `deferred`，不会切断当前连接，也不会阻止后续软件包、VMware Tools、SSH、Codex 等阶段继续执行。
+通过 SSH 运行完整安装时，脚本会先检查目标固定地址是否冲突，写入并校验 Netplan，然后把网络阶段标记为 `pending-reboot`。它不会在当前会话中执行 `netplan apply`，因此当前 DHCP SSH 连接不会中断，后续软件包、VMware Tools、SSH 和 Codex 阶段可以继续完成。
 
-其余阶段完成后，回到 VMware 控制台执行：
+其余阶段完成后直接在当前 SSH 会话执行：
 
 ```bash
-cd ~/vmware-ubuntu-bootstrap
-sudo bash install.sh --phase static-network
+sudo reboot
 ```
 
-在控制台确认 `netplan try`。未在 120 秒内确认时，网络配置应自动回滚。固定地址生效后，Windows SSH 连接需要改用新地址。
+连接会正常断开。虚拟机启动后，从 Windows 使用安装器显示的固定地址重新 SSH 登录。无需回 VMware 控制台再次运行安装器。只有直接从 VMware 控制台运行 `static-network` 阶段时，脚本才会用 `netplan try --timeout 120` 立即切换；未确认时自动回滚。
 
 ## 5. 分阶段运行
 
@@ -121,4 +120,4 @@ sudo bash install.sh --phase validate
 sudo bash install.sh --status
 ```
 
-固定网络延后时状态为 `configured-pending-console`；固定网络完成但尚未重启时状态为 `configured-pending-reboot`；只有重启后所有检查通过才会成为 `complete`。
+SSH 中写入固定网络但尚未重启时状态为 `configured-pending-reboot`；只有重启后固定地址生效且所有检查通过，状态才会成为 `complete`。Codex/CPA 安装完成后直接运行标准命令 `codex`。
