@@ -56,6 +56,7 @@ class ConfigRenderingTests(unittest.TestCase):
             install_script.index('choose_cpa_model "$CPA_BASE_URL"'),
         )
         self.assertIn('read_default "CPA 模型编号"', install_script)
+        self.assertIn('CPA_BYPASS_PROXY="true"', install_script)
         self.assertIn("当前唯一可选安装组件：Docker Engine", install_script)
         self.assertIn('CONFIRM_SSH_KEY_LOGIN="$DISABLE_SSH_PASSWORD"', install_script)
         self.assertNotIn("Windows 公钥已在另一终端登录成功", install_script)
@@ -65,6 +66,7 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn(
             'read -e -i "$default_input" -r -p "${prompt}："', shell_library
         )
+        self.assertIn("printf '*'", shell_library)
         self.assertNotIn("[默认:", shell_library)
 
     def test_runtime_and_secret_files_are_ignored(self) -> None:

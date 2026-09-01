@@ -88,12 +88,13 @@ choose_verified_proxy() {
 
 cpa_host_for_no_proxy() {
   [[ -n "${CPA_BASE_URL:-}" ]] || return 0
-  python3 - "$CPA_BASE_URL" <<'PY'
+  python3 - "$CPA_BASE_URL" "${CPA_BYPASS_PROXY:-false}" <<'PY'
 import sys
 import ipaddress
 from urllib.parse import urlparse
 host = urlparse(sys.argv[1]).hostname or ""
-if host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local"):
+force_bypass = sys.argv[2].lower() == "true"
+if force_bypass or host in {"localhost", "127.0.0.1", "::1"} or host.endswith(".local"):
     print(host)
 else:
     try:

@@ -235,16 +235,40 @@ read_default() {
 }
 
 read_secret() {
-  local prompt="$1" has_existing="${2:-false}" value=""
+  local prompt="$1" has_existing="${2:-false}" value="" character=""
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
   if is_true "$has_existing"; then
     printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}（已配置，直接回车保留）：" >"$VUB_INPUT_TTY"
   else
     printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
   fi
-  stty -echo <"$VUB_INPUT_TTY" 2>/dev/null || true
-  IFS= read -r value <"$VUB_INPUT_TTY" || true
-  stty echo <"$VUB_INPUT_TTY" 2>/dev/null || true
+  if [[ "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
+    while IFS= read -r -s -n 1 character <"$VUB_INPUT_TTY"; do
+      [[ -n "$character" ]] || break
+      case "$character" in
+        $'\177'|$'\b')
+          if [[ -n "$value" ]]; then
+            value="${value%?}"
+            printf '\b \b' >"$VUB_INPUT_TTY"
+          fi
+          ;;
+        $'\025')
+          while [[ -n "$value" ]]; do
+            value="${value%?}"
+            printf '\b \b' >"$VUB_INPUT_TTY"
+          done
+          ;;
+        *)
+          value+="$character"
+          printf '*' >"$VUB_INPUT_TTY"
+          ;;
+      esac
+    done
+  else
+    stty -echo <"$VUB_INPUT_TTY" 2>/dev/null || true
+    IFS= read -r value <"$VUB_INPUT_TTY" || true
+    stty echo <"$VUB_INPUT_TTY" 2>/dev/null || true
+  fi
   printf '\n' >"$VUB_INPUT_TTY"
   printf '%s\n' "$value"
 }
@@ -303,6 +327,7 @@ apply_config_defaults() {
   : "${CONFIGURE_CODEX:=true}"
   : "${CPA_BASE_URL:=}"
   : "${CPA_MODEL_ID:=}"
+  : "${CPA_BYPASS_PROXY:=false}"
   : "${RUN_CPA_SMOKE:=true}"
   : "${RUN_CODEX_SMOKE:=true}"
   : "${INSTALL_DOCKER:=false}"
@@ -376,6 +401,7 @@ validate_config() {
   validate_bool DISABLE_SSH_PASSWORD
   validate_bool CONFIRM_SSH_KEY_LOGIN
   validate_bool CONFIGURE_CODEX
+  validate_bool CPA_BYPASS_PROXY
   validate_bool RUN_CPA_SMOKE
   validate_bool RUN_CODEX_SMOKE
   validate_bool INSTALL_DOCKER

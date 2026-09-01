@@ -231,6 +231,7 @@ emit_config() {
   printf 'CONFIGURE_CODEX=%s\n' "$(shell_quote "$CONFIGURE_CODEX")"
   printf 'CPA_BASE_URL=%s\n' "$(shell_quote "$CPA_BASE_URL")"
   printf 'CPA_MODEL_ID=%s\n' "$(shell_quote "$CPA_MODEL_ID")"
+  printf 'CPA_BYPASS_PROXY=%s\n' "$(shell_quote "$CPA_BYPASS_PROXY")"
   printf 'RUN_CPA_SMOKE=%s\n' "$(shell_quote "$RUN_CPA_SMOKE")"
   printf 'RUN_CODEX_SMOKE=%s\n' "$(shell_quote "$RUN_CODEX_SMOKE")"
   printf 'INSTALL_DOCKER=%s\n' "$(shell_quote "$INSTALL_DOCKER")"
@@ -260,14 +261,48 @@ read_cpa_base_url() {
 
 choose_cpa_model() {
   local base_url="$1" key_file="$2" current_value="$3"
-  local models_file errors_file item existing choice selection default_index=1 index
-  local -a models=()
+  local models_file first_errors_file second_errors_file item existing choice selection default_index=1 index
+  local cpa_host cpa_no_proxy fetch_ok="false"
+  local -a models=() cpa_command=()
 
   models_file="$(mktemp)"
-  errors_file="$(mktemp)"
-  if python3 "$PROJECT_DIR/scripts/cpa_client.py" models \
-      --base-url "$base_url" --key-file "$key_file" --list \
-      >"$models_file" 2>"$errors_file"; then
+  first_errors_file="$(mktemp)"
+  second_errors_file="$(mktemp)"
+  cpa_host="$(python3 - "$base_url" <<'PY'
+import sys
+from urllib.parse import urlparse
+print(urlparse(sys.argv[1]).hostname or "")
+PY
+)"
+  cpa_no_proxy="${no_proxy:-${NO_PROXY:-}}"
+  case ",$cpa_no_proxy," in
+    *",$cpa_host,"*) ;;
+    *) cpa_no_proxy+="${cpa_no_proxy:+,}$cpa_host" ;;
+  esac
+  cpa_command=(python3 "$PROJECT_DIR/scripts/cpa_client.py" models
+    --base-url "$base_url" --key-file "$key_file" --list)
+
+  if is_true "${CPA_BYPASS_PROXY:-false}"; then
+    if env no_proxy="$cpa_no_proxy" NO_PROXY="$cpa_no_proxy" \
+        "${cpa_command[@]}" >"$models_file" 2>"$first_errors_file"; then
+      fetch_ok="true"
+    elif "${cpa_command[@]}" >"$models_file" 2>"$second_errors_file"; then
+      fetch_ok="true"
+      CPA_BYPASS_PROXY="false"
+      ui_info "CPA 直连失败但代理访问成功，后续 CPA 请求将使用代理。"
+    fi
+  else
+    if "${cpa_command[@]}" >"$models_file" 2>"$first_errors_file"; then
+      fetch_ok="true"
+    elif env no_proxy="$cpa_no_proxy" NO_PROXY="$cpa_no_proxy" \
+        "${cpa_command[@]}" >"$models_file" 2>"$second_errors_file"; then
+      fetch_ok="true"
+      CPA_BYPASS_PROXY="true"
+      ui_info "CPA 代理访问失败但直连成功，已将 $cpa_host 加入 NO_PROXY。"
+    fi
+  fi
+
+  if is_true "$fetch_ok"; then
     while IFS= read -r item; do
       [[ "$item" =~ ^[A-Za-z0-9._:/-]+$ ]] || continue
       existing="false"
@@ -281,9 +316,10 @@ choose_cpa_model() {
     done <"$models_file"
   else
     warn "无法从 CPA /v1/models 获取模型列表，将改为手动输入。"
-    tail -n 10 "$errors_file" >&2 || true
+    tail -n 5 "$first_errors_file" >&2 || true
+    tail -n 5 "$second_errors_file" >&2 || true
   fi
-  rm -f "$models_file" "$errors_file"
+  rm -f "$models_file" "$first_errors_file" "$second_errors_file"
 
   if (( ${#models[@]} == 0 )); then
     while true; do
