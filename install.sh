@@ -76,6 +76,7 @@ remote_bootstrap() {
   fi
 
   printf '项目已准备到：%s\n' "$install_dir"
+  export VUB_REMOTE_MODE="true"
   exec bash "$install_dir/install.sh" "$@"
 }
 
@@ -158,15 +159,52 @@ if [[ "$MODE" == "phase" ]]; then
   exec bash "$PROJECT_DIR/bootstrap.sh" "${args[@]}"
 fi
 
+clear_screen() {
+  if [[ -t 1 ]]; then
+    if command -v clear >/dev/null 2>&1; then
+      clear 2>/dev/null || printf '\033[2J\033[H'
+    else
+      printf '\033[2J\033[H'
+    fi
+  fi
+}
+
+banner_row() {
+  local text="$1" width=48 padding left right
+  padding=$((width - ${#text}))
+  (( padding >= 0 )) || die "抬头文本超过边框宽度：$text"
+  left=$((padding / 2))
+  right=$((padding - left))
+  printf '│%*s%s%*s│\n' "$left" '' "$text" "$right" ''
+}
+
+ui_line() {
+  printf '%b\n' "${VUB_DIM}────────────────────────────────────────────────────────────${VUB_RESET}"
+}
+
+ui_info() {
+  printf '%b\n' "${VUB_BLUE}${VUB_BOLD}INFO${VUB_RESET} $*"
+}
+
+ui_section() {
+  ui_line
+  printf '%b\n' "${VUB_CYAN}${VUB_BOLD}$1${VUB_RESET}"
+}
+
 banner() {
-  printf '%b\n' "${VUB_CYAN}${VUB_BOLD}"
-  cat <<'EOF'
-╭────────────────────────────────────────────────╮
-│          VMware Ubuntu Bootstrap               │
-│  Proxy · Network · Power · SSH · Codex/CPA    │
-╰────────────────────────────────────────────────╯
-EOF
+  clear_screen
+  printf '%b' "${VUB_CYAN}${VUB_BOLD}"
+  printf '%s\n' '╭────────────────────────────────────────────────╮'
+  banner_row 'VMware Ubuntu Bootstrap'
+  banner_row 'One-click installer'
+  banner_row 'Proxy, Network, Power, SSH, Codex/CPA'
+  printf '%s\n' '╰────────────────────────────────────────────────╯'
   printf '%b' "$VUB_RESET"
+  if is_true "${VUB_REMOTE_MODE:-false}"; then
+    ui_info "当前是一键远程执行模式；项目目录：$PROJECT_DIR；冒号后的值可直接回车采用。"
+  else
+    ui_info "当前是本地交互执行模式；项目目录：$PROJECT_DIR；冒号后的值可直接回车采用。"
+  fi
 }
 
 emit_config() {
@@ -213,6 +251,7 @@ collect_config() {
   banner
 
   local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input=""
+  ui_section "基础信息"
   detected_user="${TARGET_USER:-${SUDO_USER:-}}"
   TARGET_USER="$(read_default "要配置的 Ubuntu 登录用户（通常直接回车）" "$detected_user")"
   resolve_real_user
@@ -224,12 +263,12 @@ collect_config() {
   detected_gateway="$(current_gateway)"
   detected_dns="$(current_dns_servers "$NETWORK_INTERFACE")"
 
-  printf '\n%b\n' "${VUB_CYAN}${VUB_BOLD}代理${VUB_RESET}"
+  ui_section "代理"
   PROXY_HOST="$(read_default "代理主机（留空自动发现）" "$PROXY_HOST")"
   PROXY_PORT="$(read_default "代理端口" "$PROXY_PORT")"
   PROXY_SCAN_CIDR="$(read_default "代理扫描网段" "${PROXY_SCAN_CIDR:-$(cidr24_for_ip "$detected_ip")}")"
 
-  printf '\n%b\n' "${VUB_CYAN}${VUB_BOLD}固定网络${VUB_RESET}"
+  ui_section "固定网络"
   CONFIGURE_STATIC_NETWORK="$(bool_prompt "配置固定桥接 IP" "$CONFIGURE_STATIC_NETWORK")"
   STATIC_IPV4_PREFIX="192.168.1"
   STATIC_IPV4_LAST_OCTET="$(read_default "固定 IPv4 末位（255 不可用）" "$STATIC_IPV4_LAST_OCTET")"
@@ -239,7 +278,7 @@ collect_config() {
   HOSTNAME="$(read_default "主机名（留空保持当前）" "${HOSTNAME:-$(hostname)}")"
   TIMEZONE="$(read_default "时区" "$TIMEZONE")"
 
-  printf '\n%b\n' "${VUB_CYAN}${VUB_BOLD}SSH${VUB_RESET}"
+  ui_section "SSH"
   SSH_PORT="$(read_default "SSH 端口" "$SSH_PORT")"
   existing_key_file="$REAL_HOME/.ssh/authorized_keys"
   if [[ -z "$ADMIN_PUBKEYS" && -r "$existing_key_file" ]]; then
@@ -251,7 +290,7 @@ collect_config() {
     ADMIN_PUBKEYS="$(read_default "粘贴 Windows SSH 公钥" "")"
   fi
   [[ -n "$ADMIN_PUBKEYS" ]] || die "至少需要一个 SSH 公钥。"
-  ENABLE_UFW="$(bool_prompt "开启 UFW（默认不开）" "$ENABLE_UFW")"
+  ENABLE_UFW="$(bool_prompt "开启 UFW" "$ENABLE_UFW")"
   DISABLE_SSH_PASSWORD="$(bool_prompt "已验证公钥登录并关闭 SSH 密码认证" "$DISABLE_SSH_PASSWORD")"
   if is_true "$DISABLE_SSH_PASSWORD"; then
     CONFIRM_SSH_KEY_LOGIN="$(bool_prompt "确认已从第二终端完成公钥登录" "$CONFIRM_SSH_KEY_LOGIN")"
@@ -259,7 +298,7 @@ collect_config() {
     CONFIRM_SSH_KEY_LOGIN="false"
   fi
 
-  printf '\n%b\n' "${VUB_CYAN}${VUB_BOLD}Codex / CPA${VUB_RESET}"
+  ui_section "Codex / CPA"
   CONFIGURE_CODEX="$(bool_prompt "安装并配置 Codex" "$CONFIGURE_CODEX")"
   if is_true "$CONFIGURE_CODEX"; then
     CPA_BASE_URL="$(read_default "CPA /v1 地址" "$CPA_BASE_URL")"
@@ -284,7 +323,8 @@ collect_config() {
     RUN_CODEX_SMOKE="$(bool_prompt "执行一次最小 codex exec 验证" "$RUN_CODEX_SMOKE")"
   fi
 
-  INSTALL_DOCKER="$(bool_prompt "安装 Docker（首版默认不安装）" "$INSTALL_DOCKER")"
+  ui_section "可选组件"
+  INSTALL_DOCKER="$(bool_prompt "安装 Docker" "$INSTALL_DOCKER")"
   validate_config
 }
 
@@ -307,9 +347,8 @@ write_config_file() {
 }
 
 show_summary() {
+  ui_section "配置确认"
   cat <<EOF
-
-即将应用：
   用户：        $TARGET_USER
   网卡：        $NETWORK_INTERFACE
   代理：        ${PROXY_HOST:-自动发现}:$PROXY_PORT（$PROXY_SCAN_CIDR）

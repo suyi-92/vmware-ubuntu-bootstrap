@@ -136,7 +136,7 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY bash install.s
 
 ## 6. 交互配置
 
-直接按回车会采用显示的默认值。主要配置如下：
+提示符冒号后的内容是可编辑预填值，例如 `SSH 端口：22`；直接按回车采用当前值，也可以先编辑再确认。主要配置如下：
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |

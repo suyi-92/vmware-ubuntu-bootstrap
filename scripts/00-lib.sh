@@ -31,18 +31,22 @@ if [[ -t 1 ]]; then
   VUB_RED=$'\033[31m'
   VUB_YELLOW=$'\033[33m'
   VUB_GREEN=$'\033[32m'
+  VUB_BLUE=$'\033[34m'
   VUB_CYAN=$'\033[36m'
+  VUB_DIM=$'\033[2m'
   VUB_BOLD=$'\033[1m'
   VUB_RESET=$'\033[0m'
 else
   VUB_RED=""
   VUB_YELLOW=""
   VUB_GREEN=""
+  VUB_BLUE=""
   VUB_CYAN=""
+  VUB_DIM=""
   VUB_BOLD=""
   VUB_RESET=""
 fi
-export VUB_RED VUB_YELLOW VUB_GREEN VUB_CYAN VUB_BOLD VUB_RESET
+export VUB_RED VUB_YELLOW VUB_GREEN VUB_BLUE VUB_CYAN VUB_DIM VUB_BOLD VUB_RESET
 
 export VUB_PROJECT_DIR VUB_CONFIG_FILE VUB_DRY_RUN VUB_YES VUB_VERBOSE VUB_TESTING
 export VUB_ETC_DIR VUB_STATE_DIR VUB_LOG_DIR VUB_BACKUP_ROOT VUB_PHASE_NAME
@@ -217,12 +221,12 @@ init_input_tty() {
 read_default() {
   local prompt="$1" default_value="${2:-}" value=""
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
-  if [[ -n "$default_value" ]]; then
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET} [默认: ${default_value}]: " >"$VUB_INPUT_TTY"
+  printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
+  if [[ -n "$default_value" && "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
+    IFS= read -e -i "$default_value" -r value <"$VUB_INPUT_TTY" || true
   else
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}: " >"$VUB_INPUT_TTY"
+    IFS= read -r value <"$VUB_INPUT_TTY" || true
   fi
-  IFS= read -r value <"$VUB_INPUT_TTY" || true
   printf '%s\n' "${value:-$default_value}"
 }
 
@@ -230,9 +234,9 @@ read_secret() {
   local prompt="$1" has_existing="${2:-false}" value=""
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
   if is_true "$has_existing"; then
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET} [已配置；回车保留]: " >"$VUB_INPUT_TTY"
+    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}（已配置，直接回车保留）：" >"$VUB_INPUT_TTY"
   else
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}: " >"$VUB_INPUT_TTY"
+    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
   fi
   stty -echo <"$VUB_INPUT_TTY" 2>/dev/null || true
   IFS= read -r value <"$VUB_INPUT_TTY" || true
@@ -242,16 +246,20 @@ read_secret() {
 }
 
 read_yes_no() {
-  local prompt="$1" default_value="${2:-yes}" value suffix
+  local prompt="$1" default_value="${2:-yes}" value default_input
   case "${default_value,,}" in
-    y|yes|true|1) default_value="yes"; suffix="Y/n" ;;
-    n|no|false|0) default_value="no"; suffix="y/N" ;;
+    y|yes|true|1) default_value="yes"; default_input="Y" ;;
+    n|no|false|0) default_value="no"; default_input="N" ;;
     *) die "read_yes_no 默认值必须是 yes 或 no。" ;;
   esac
   [[ -n "$VUB_INPUT_TTY" ]] || init_input_tty
   while true; do
-    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET} [${suffix}]: " >"$VUB_INPUT_TTY"
-    IFS= read -r value <"$VUB_INPUT_TTY" || true
+    printf '%b' "${VUB_BOLD}${prompt}${VUB_RESET}：" >"$VUB_INPUT_TTY"
+    if [[ "$VUB_INPUT_TTY" == "/dev/tty" ]]; then
+      IFS= read -e -i "$default_input" -r value <"$VUB_INPUT_TTY" || true
+    else
+      IFS= read -r value <"$VUB_INPUT_TTY" || true
+    fi
     if [[ -z "$value" ]]; then
       [[ "$default_value" == "yes" ]]
       return

@@ -43,6 +43,16 @@ class ConfigRenderingTests(unittest.TestCase):
         attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
         self.assertIn("*.sh text eol=lf", attributes)
 
+    def test_interactive_ui_contract(self) -> None:
+        install_script = (ROOT / "install.sh").read_text(encoding="utf-8")
+        shell_library = (ROOT / "scripts" / "00-lib.sh").read_text(encoding="utf-8")
+        self.assertIn("clear_screen", install_script)
+        self.assertIn("banner_row 'VMware Ubuntu Bootstrap'", install_script)
+        self.assertIn("ui_info", install_script)
+        self.assertIn('ui_section "基础信息"', install_script)
+        self.assertIn('read -e -i "$default_value"', shell_library)
+        self.assertNotIn("[默认:", shell_library)
+
     def test_runtime_and_secret_files_are_ignored(self) -> None:
         for relative in ("config.env", "secrets/cpa-api-key", "run.log", "state/x"):
             result = subprocess.run(

@@ -61,7 +61,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 不要给这条命令添加 `sudo`。入口会安装缺失的 Git，将仓库准备到 `~/vmware-ubuntu-bootstrap`，然后由本地安装器自行提权。
 
-安装器从 `/dev/tty` 逐项读取配置，普通值可直接回车使用默认值，CPA API key 不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。
+安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。
 
 ## 4. 从 SSH 安装时的固定网络处理
 
