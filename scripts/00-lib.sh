@@ -370,7 +370,7 @@ apply_config_defaults() {
   : "${DNS_SERVERS:=}"
   : "${ALLOW_SSH_NETWORK_CHANGE:=false}"
   : "${HOSTNAME:=}"
-  : "${TIMEZONE:=Asia/Shanghai}"
+  : "${TIMEZONE:=America/New_York}"
   : "${SSH_PORT:=22}"
   : "${ADMIN_PUBKEYS:=}"
   : "${ENABLE_UFW:=false}"

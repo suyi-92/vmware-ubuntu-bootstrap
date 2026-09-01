@@ -81,7 +81,9 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("ensure_startup_dependencies", bootstrap)
         self.assertIn("scripts/00-dependencies.sh", bootstrap)
         self.assertIn(': "${INSTALL_DOCKER:=true}"', shell_library)
+        self.assertIn(': "${TIMEZONE:=America/New_York}"', shell_library)
         self.assertIn('VUB_CONFIG_VERSION="2"', example)
+        self.assertIn('TIMEZONE="America/New_York"', example)
         self.assertIn('INSTALL_DOCKER="true"', example)
         self.assertIn(
             'if [[ "$VUB_CONFIG_VERSION" == "1" ]]',
