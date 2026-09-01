@@ -142,14 +142,16 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY bash install.s
 | --- | --- | --- |
 | 代理主机 | 自动发现 | 扫描当前 `/24` 中真正可用的 `7890` 代理 |
 | 固定 IPv4 | `192.168.1.254/24` | 应确保不在 DHCP 动态分配范围且未被占用 |
+| DNS 服务器 | 自动读取当前连接 | 将 `github.com` 等域名解析为 IP；多个地址使用空格分隔 |
 | SSH 端口 | `22` | 支持自定义端口 |
 | Windows SSH 公钥 | 必填 | 写入目标用户的 `authorized_keys` |
 | UFW | 不开启 | 已经处于 active 状态时仍会添加 SSH 放行规则 |
-| SSH 密码登录 | 保留现状 | 只有确认公钥登录成功后才允许关闭 |
+| 关闭 SSH 密码登录 | `N` | 首次安装保持 `N`；确认 Windows 公钥登录成功后才改为 `Y` |
 | Codex/CPA | 配置 | 可在交互中选择跳过 |
 | Docker | 不安装 | 可在交互中选择安装 |
 
 CPA API key 使用无回显输入，保存到用户目录下权限为 `600` 的凭据文件，不写入 TOML、日志或 Git。
+公网 CPA 地址必须使用 HTTPS，避免 API key 在网络中明文传输；HTTP 只允许回环地址、`.local` 或明确的私有局域网 IP。
 
 ## 7. SSH 配置结果
 

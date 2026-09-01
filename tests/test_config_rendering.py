@@ -50,6 +50,7 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("banner_row 'VMware Ubuntu Bootstrap'", install_script)
         self.assertIn("ui_info", install_script)
         self.assertIn('ui_section "基础信息"', install_script)
+        self.assertIn('read_default "CPA /v1 地址，公网必须 HTTPS"', install_script)
         self.assertIn('read -e -i "$default_value"', shell_library)
         self.assertNotIn("[默认:", shell_library)
 

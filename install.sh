@@ -245,6 +245,19 @@ bool_prompt() {
   fi
 }
 
+read_cpa_base_url() {
+  local current_value="$1" candidate normalized
+  while true; do
+    candidate="$(read_default "CPA /v1 地址，公网必须 HTTPS" "$current_value")"
+    if normalized="$(validate_cpa_url "$candidate")"; then
+      printf '%s\n' "$normalized"
+      return 0
+    fi
+    warn "CPA /v1 地址无效，请修改后重新确认。"
+    current_value="$candidate"
+  done
+}
+
 collect_config() {
   init_input_tty
   load_config false
@@ -253,7 +266,7 @@ collect_config() {
   local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input=""
   ui_section "基础信息"
   detected_user="${TARGET_USER:-${SUDO_USER:-}}"
-  TARGET_USER="$(read_default "要配置的 Ubuntu 登录用户（通常直接回车）" "$detected_user")"
+  TARGET_USER="$(read_default "Ubuntu 登录用户" "$detected_user")"
   resolve_real_user
 
   detected_iface="$(current_interface)"
@@ -271,10 +284,10 @@ collect_config() {
   ui_section "固定网络"
   CONFIGURE_STATIC_NETWORK="$(bool_prompt "配置固定桥接 IP" "$CONFIGURE_STATIC_NETWORK")"
   STATIC_IPV4_PREFIX="192.168.1"
-  STATIC_IPV4_LAST_OCTET="$(read_default "固定 IPv4 末位（255 不可用）" "$STATIC_IPV4_LAST_OCTET")"
+  STATIC_IPV4_LAST_OCTET="$(read_default "固定 IPv4 末位" "$STATIC_IPV4_LAST_OCTET")"
   PREFIX_LENGTH="24"
   GATEWAY_IPV4="$(read_default "默认网关" "${GATEWAY_IPV4:-$detected_gateway}")"
-  DNS_SERVERS="$(read_default "DNS（空格分隔）" "${DNS_SERVERS:-$detected_dns}")"
+  DNS_SERVERS="$(read_default "DNS 服务器" "${DNS_SERVERS:-$detected_dns}")"
   HOSTNAME="$(read_default "主机名（留空保持当前）" "${HOSTNAME:-$(hostname)}")"
   TIMEZONE="$(read_default "时区" "$TIMEZONE")"
 
@@ -287,13 +300,14 @@ collect_config() {
   if [[ -n "$ADMIN_PUBKEYS" ]] && read_yes_no "保留已配置的 SSH 公钥" yes; then
     :
   else
-    ADMIN_PUBKEYS="$(read_default "粘贴 Windows SSH 公钥" "")"
+    ADMIN_PUBKEYS="$(read_default "Windows SSH 公钥" "")"
   fi
   [[ -n "$ADMIN_PUBKEYS" ]] || die "至少需要一个 SSH 公钥。"
   ENABLE_UFW="$(bool_prompt "开启 UFW" "$ENABLE_UFW")"
-  DISABLE_SSH_PASSWORD="$(bool_prompt "已验证公钥登录并关闭 SSH 密码认证" "$DISABLE_SSH_PASSWORD")"
+  ui_info "首次安装请保持关闭 SSH 密码登录为 N；确认 Windows 公钥登录成功后再改为 Y。"
+  DISABLE_SSH_PASSWORD="$(bool_prompt "关闭 SSH 密码登录" "$DISABLE_SSH_PASSWORD")"
   if is_true "$DISABLE_SSH_PASSWORD"; then
-    CONFIRM_SSH_KEY_LOGIN="$(bool_prompt "确认已从第二终端完成公钥登录" "$CONFIRM_SSH_KEY_LOGIN")"
+    CONFIRM_SSH_KEY_LOGIN="$(bool_prompt "Windows 公钥已在另一终端登录成功" "$CONFIRM_SSH_KEY_LOGIN")"
   else
     CONFIRM_SSH_KEY_LOGIN="false"
   fi
@@ -301,8 +315,7 @@ collect_config() {
   ui_section "Codex / CPA"
   CONFIGURE_CODEX="$(bool_prompt "安装并配置 Codex" "$CONFIGURE_CODEX")"
   if is_true "$CONFIGURE_CODEX"; then
-    CPA_BASE_URL="$(read_default "CPA /v1 地址" "$CPA_BASE_URL")"
-    CPA_BASE_URL="$(validate_cpa_url "$CPA_BASE_URL")"
+    CPA_BASE_URL="$(read_cpa_base_url "$CPA_BASE_URL")"
     CPA_MODEL_ID="$(read_default "CPA 模型 ID" "$CPA_MODEL_ID")"
     secret_file="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
     [[ -s "$secret_file" ]] && secret_exists="true"
