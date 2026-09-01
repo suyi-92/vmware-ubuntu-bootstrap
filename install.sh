@@ -258,12 +258,81 @@ read_cpa_base_url() {
   done
 }
 
+choose_cpa_model() {
+  local base_url="$1" key_file="$2" current_value="$3"
+  local models_file errors_file item existing choice selection default_index=1 index
+  local -a models=()
+
+  models_file="$(mktemp)"
+  errors_file="$(mktemp)"
+  if python3 "$PROJECT_DIR/scripts/cpa_client.py" models \
+      --base-url "$base_url" --key-file "$key_file" --list \
+      >"$models_file" 2>"$errors_file"; then
+    while IFS= read -r item; do
+      [[ "$item" =~ ^[A-Za-z0-9._:/-]+$ ]] || continue
+      existing="false"
+      for choice in "${models[@]}"; do
+        if [[ "$choice" == "$item" ]]; then
+          existing="true"
+          break
+        fi
+      done
+      is_true "$existing" || models+=("$item")
+    done <"$models_file"
+  else
+    warn "无法从 CPA /v1/models 获取模型列表，将改为手动输入。"
+    tail -n 10 "$errors_file" >&2 || true
+  fi
+  rm -f "$models_file" "$errors_file"
+
+  if (( ${#models[@]} == 0 )); then
+    while true; do
+      CPA_MODEL_ID="$(read_default "CPA 模型 ID" "$current_value")"
+      if [[ "$CPA_MODEL_ID" =~ ^[A-Za-z0-9._:/-]+$ ]]; then
+        return 0
+      fi
+      warn "CPA 模型 ID 不能为空，且只能包含英文、数字、点、下划线、冒号、斜杠和短横线。"
+      current_value="$CPA_MODEL_ID"
+    done
+  fi
+
+  if (( ${#models[@]} == 1 )); then
+    CPA_MODEL_ID="${models[0]}"
+    ui_info "CPA 只返回一个模型，已自动选择：$CPA_MODEL_ID"
+    return 0
+  fi
+
+  for index in "${!models[@]}"; do
+    if [[ "${models[$index]}" == "$current_value" ]]; then
+      default_index=$((index + 1))
+      break
+    fi
+  done
+
+  ui_info "CPA 返回 ${#models[@]} 个模型；接口不提供质量排名，请按编号选择。"
+  for index in "${!models[@]}"; do
+    printf '  %d. %s\n' "$((index + 1))" "${models[$index]}"
+  done
+  while true; do
+    choice="$(read_default "CPA 模型编号" "$default_index")"
+    if [[ "$choice" =~ ^[0-9]+$ ]]; then
+      selection=$((10#$choice))
+      if (( selection >= 1 && selection <= ${#models[@]} )); then
+        CPA_MODEL_ID="${models[$((selection - 1))]}"
+        ui_info "已选择 CPA 模型：$CPA_MODEL_ID"
+        return 0
+      fi
+    fi
+    warn "请输入 1–${#models[@]} 之间的模型编号。"
+  done
+}
+
 collect_config() {
   init_input_tty
   load_config false
   banner
 
-  local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input=""
+  local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input="" model_key_file
   ui_section "基础信息"
   detected_user="${TARGET_USER:-${SUDO_USER:-}}"
   TARGET_USER="$(read_default "Ubuntu 登录用户" "$detected_user")"
@@ -306,17 +375,12 @@ collect_config() {
   ENABLE_UFW="$(bool_prompt "开启 UFW" "$ENABLE_UFW")"
   ui_info "首次安装请保持关闭 SSH 密码登录为 N；确认 Windows 公钥登录成功后再改为 Y。"
   DISABLE_SSH_PASSWORD="$(bool_prompt "关闭 SSH 密码登录" "$DISABLE_SSH_PASSWORD")"
-  if is_true "$DISABLE_SSH_PASSWORD"; then
-    CONFIRM_SSH_KEY_LOGIN="$(bool_prompt "Windows 公钥已在另一终端登录成功" "$CONFIRM_SSH_KEY_LOGIN")"
-  else
-    CONFIRM_SSH_KEY_LOGIN="false"
-  fi
+  CONFIRM_SSH_KEY_LOGIN="$DISABLE_SSH_PASSWORD"
 
   ui_section "Codex / CPA"
   CONFIGURE_CODEX="$(bool_prompt "安装并配置 Codex" "$CONFIGURE_CODEX")"
   if is_true "$CONFIGURE_CODEX"; then
     CPA_BASE_URL="$(read_cpa_base_url "$CPA_BASE_URL")"
-    CPA_MODEL_ID="$(read_default "CPA 模型 ID" "$CPA_MODEL_ID")"
     secret_file="$REAL_HOME/.config/vmware-ubuntu-bootstrap/secrets/cpa-api-key"
     [[ -s "$secret_file" ]] && secret_exists="true"
     key_input="$(read_secret "CPA API key" "$secret_exists")"
@@ -330,13 +394,18 @@ collect_config() {
       chmod 0600 "$VUB_TEMP_SECRET"
       VUB_CPA_API_KEY_FILE="$VUB_TEMP_SECRET"
       export VUB_CPA_API_KEY_FILE
+      model_key_file="$VUB_TEMP_SECRET"
       key_input=""
+    else
+      model_key_file="$secret_file"
     fi
+    choose_cpa_model "$CPA_BASE_URL" "$model_key_file" "$CPA_MODEL_ID"
     RUN_CPA_SMOKE="$(bool_prompt "发送一次最小 CPA Responses 验证请求" "$RUN_CPA_SMOKE")"
     RUN_CODEX_SMOKE="$(bool_prompt "执行一次最小 codex exec 验证" "$RUN_CODEX_SMOKE")"
   fi
 
   ui_section "可选组件"
+  ui_info "当前唯一可选安装组件：Docker Engine（包含 daemon、CLI 和代理配置）。"
   INSTALL_DOCKER="$(bool_prompt "安装 Docker" "$INSTALL_DOCKER")"
   validate_config
 }

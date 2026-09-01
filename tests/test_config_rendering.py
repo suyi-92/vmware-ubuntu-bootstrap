@@ -51,6 +51,14 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("ui_info", install_script)
         self.assertIn('ui_section "基础信息"', install_script)
         self.assertIn('read_default "CPA /v1 地址，公网必须 HTTPS"', install_script)
+        self.assertLess(
+            install_script.index('key_input="$(read_secret "CPA API key"'),
+            install_script.index('choose_cpa_model "$CPA_BASE_URL"'),
+        )
+        self.assertIn('read_default "CPA 模型编号"', install_script)
+        self.assertIn("当前唯一可选安装组件：Docker Engine", install_script)
+        self.assertIn('CONFIRM_SSH_KEY_LOGIN="$DISABLE_SSH_PASSWORD"', install_script)
+        self.assertNotIn("Windows 公钥已在另一终端登录成功", install_script)
         self.assertIn(
             'read -e -i "$default_value" -r -p "${prompt}："', shell_library
         )
