@@ -72,6 +72,7 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertNotIn("[默认:", shell_library)
 
     def test_dependency_and_proxy_contract(self) -> None:
+        install_script = (ROOT / "install.sh").read_text(encoding="utf-8")
         bootstrap = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
         packages = (ROOT / "scripts" / "03-packages.sh").read_text(encoding="utf-8")
         proxy = (ROOT / "scripts" / "02-proxy.sh").read_text(encoding="utf-8")
@@ -97,6 +98,14 @@ class ConfigRenderingTests(unittest.TestCase):
             self.assertIn(package, packages)
         self.assertIn("all_proxy", proxy)
         self.assertIn("host.docker.internal", proxy)
+        self.assertIn(
+            'VUB_TEMP_SECRET="$(make_private_temp_file ', install_script
+        )
+        self.assertNotIn("\n      umask 077\n", install_script)
+        self.assertLess(
+            proxy.index("normalize_system_config_permissions /etc/gitconfig"),
+            proxy.index("git_as_user config --global --fixed-value"),
+        )
 
     def test_runtime_and_secret_files_are_ignored(self) -> None:
         for relative in ("config.env", "secrets/cpa-api-key", "run.log", "state/x"):

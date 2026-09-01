@@ -11,6 +11,7 @@ python3 -m compileall -q "$ROOT/scripts" "$ROOT/tests"
 python3 -m unittest discover -s "$ROOT/tests" -p 'test_*.py' -v
 bash "$ROOT/tests/test_input_validation.sh"
 bash "$ROOT/tests/test_dependency_install.sh"
+bash "$ROOT/tests/test_gitconfig_permissions.sh"
 bash "$ROOT/tests/test_remote_install_entry.sh"
 bash "$ROOT/tests/test_backup_rollback.sh"
 bash "$ROOT/tests/test_status_read_only.sh"

@@ -435,8 +435,7 @@ collect_config() {
       die "首次配置必须输入 CPA API key。"
     fi
     if [[ -n "$key_input" ]]; then
-      umask 077
-      VUB_TEMP_SECRET="$(mktemp /run/vmware-ubuntu-bootstrap-cpa.XXXXXX)"
+      VUB_TEMP_SECRET="$(make_private_temp_file /run/vmware-ubuntu-bootstrap-cpa.XXXXXX)"
       printf '%s\n' "$key_input" >"$VUB_TEMP_SECRET"
       chmod 0600 "$VUB_TEMP_SECRET"
       VUB_CPA_API_KEY_FILE="$VUB_TEMP_SECRET"

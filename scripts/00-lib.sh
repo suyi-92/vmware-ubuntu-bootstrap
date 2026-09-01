@@ -154,6 +154,22 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "缺少必需命令：$1"
 }
 
+make_private_temp_file() {
+  local template="$1"
+  (
+    umask 077
+    mktemp "$template"
+  )
+}
+
+normalize_system_config_permissions() {
+  local path="$1"
+  [[ -e "$path" ]] || return 0
+  [[ -f "$path" ]] || die "系统配置不是普通文件：$path"
+  chown root:root -- "$path"
+  chmod 0644 -- "$path"
+}
+
 install_missing_apt_packages() {
   local description="$1" package
   shift

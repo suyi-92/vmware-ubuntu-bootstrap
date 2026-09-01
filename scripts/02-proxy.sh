@@ -134,6 +134,7 @@ ensure_git_include() {
   backup_path /etc/gitconfig
   git config --system --fixed-value --get-all include.path "$path" >/dev/null 2>&1 \
     || git config --system --add include.path "$path"
+  normalize_system_config_permissions /etc/gitconfig
 
   backup_path "$REAL_HOME/.gitconfig"
   git_as_user config --global --fixed-value --get-all include.path "$path" >/dev/null 2>&1 \
@@ -153,6 +154,7 @@ remove_git_include() {
   if command -v git >/dev/null 2>&1; then
     backup_path /etc/gitconfig
     git config --system --fixed-value --unset-all include.path "$path" 2>/dev/null || true
+    normalize_system_config_permissions /etc/gitconfig
     backup_path "$REAL_HOME/.gitconfig"
     git_as_user config --global --fixed-value --unset-all include.path "$path" 2>/dev/null || true
     backup_path /root/.gitconfig
