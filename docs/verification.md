@@ -60,7 +60,8 @@ pgrep -a -u "$USER" -x vmtoolsd | grep -- '-n vmusr'
 ```bash
 sudo /usr/sbin/sshd -t
 systemctl is-active ssh.socket 2>/dev/null || systemctl is-active ssh
-ss -ltn | grep ':22 '
+ss -ltn4 | grep ':22 '
+ss -ltn6 | grep ':22 '
 ```
 
 从 Windows 新开 PowerShell：

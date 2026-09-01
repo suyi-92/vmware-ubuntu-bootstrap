@@ -167,7 +167,7 @@ Docker Engine 默认安装，包含 Docker daemon、CLI、用户组和代理配�
 1. 安装并启动 `openssh-server`。
 2. 写入并校验 Windows 公钥，设置正确的 `.ssh` 和 `authorized_keys` 权限。
 3. 启用公钥认证并禁止 root 远程登录。
-4. 支持 Ubuntu 24.04 的 `ssh.socket` 和传统 `ssh.service`，包括自定义端口。
+4. 支持 Ubuntu 24.04 的 `ssh.socket` 和传统 `ssh.service`，包括自定义端口及 IPv4/IPv6 双栈监听。
 5. 默认保留密码登录；只有明确确认公钥登录成功后才关闭。
 6. 在 UFW 已启用或用户选择启用时，添加当前局域网到 SSH 端口的放行规则。
 7. 执行 `sshd -t`、监听端口和服务状态检查。

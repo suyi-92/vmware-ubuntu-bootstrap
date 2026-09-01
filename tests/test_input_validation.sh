@@ -63,7 +63,11 @@ fi
 SOCKET_RENDERED="$(render_template "$ROOT/templates/ssh-socket.conf.tpl" "SSH_PORT=2222")"
 grep -Fxq 'ListenStream=' <<<"$SOCKET_RENDERED" \
   || fail "SSH socket template does not reset the vendor listener"
-grep -Fxq 'ListenStream=2222' <<<"$SOCKET_RENDERED" \
-  || fail "SSH socket template does not apply the selected port"
+grep -Fxq 'ListenStream=0.0.0.0:2222' <<<"$SOCKET_RENDERED" \
+  || fail "SSH socket template does not apply the IPv4 listener"
+grep -Fxq 'ListenStream=[::]:2222' <<<"$SOCKET_RENDERED" \
+  || fail "SSH socket template does not apply the IPv6 listener"
+grep -Fxq 'BindIPv6Only=ipv6-only' <<<"$SOCKET_RENDERED" \
+  || fail "SSH socket template does not isolate the explicit IPv6 listener"
 
 echo "input validation: PASS"

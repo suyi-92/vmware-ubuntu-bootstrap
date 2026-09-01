@@ -101,8 +101,17 @@ else
 fi
 
 if ! is_dry_run; then
-  ss -H -ltn | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
-    || die "SSH 没有在 tcp/$SSH_PORT 监听。"
+  if is_true "$SSH_SOCKET_MODE"; then
+    SSH_SOCKET_LISTEN="$(systemctl show ssh.socket -p Listen --value 2>/dev/null || true)"
+    grep -Eq "(^|[[:space:]])0\\.0\\.0\\.0:${SSH_PORT}([[:space:]]|$)" <<<"$SSH_SOCKET_LISTEN" \
+      || die "ssh.socket 没有配置 IPv4 tcp/$SSH_PORT 监听。"
+    grep -Eq "(^|[[:space:]])\\[::\\]:${SSH_PORT}([[:space:]]|$)" <<<"$SSH_SOCKET_LISTEN" \
+      || die "ssh.socket 没有配置 IPv6 tcp/$SSH_PORT 监听。"
+  fi
+  ss -H -ltn4 | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
+    || die "SSH 没有在 IPv4 tcp/$SSH_PORT 监听。"
+  ss -H -ltn6 | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
+    || die "SSH 没有在 IPv6 tcp/$SSH_PORT 监听。"
 fi
 
 UFW_ACTIVE="false"

@@ -144,8 +144,10 @@ grep -Fxq 'permitrootlogin no' <<<"$SSHD_EFFECTIVE" || die "root SSH 禁用验�
 if is_true "$DISABLE_SSH_PASSWORD"; then
   grep -Fxq 'passwordauthentication no' <<<"$SSHD_EFFECTIVE" || die "SSH 密码禁用验收失败。"
 fi
-ss -H -ltn | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
-  || die "SSH 端口未监听。"
+ss -H -ltn4 | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
+  || die "SSH IPv4 端口未监听。"
+ss -H -ltn6 | awk -v suffix=":$SSH_PORT" '$4 ~ (suffix "$") {found=1} END {exit !found}' \
+  || die "SSH IPv6 端口未监听。"
 grep -Fq '# BEGIN vmware-ubuntu-bootstrap keys' "$REAL_HOME/.ssh/authorized_keys" \
   || die "受管 SSH 公钥块不存在。"
 if is_true "$ENABLE_UFW"; then
