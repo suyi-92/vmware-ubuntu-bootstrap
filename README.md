@@ -1,6 +1,6 @@
 # VMware Ubuntu Bootstrap
 
-用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、常用软件、固定网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
+用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、软件源与更新、sudo 策略、固定网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
 
 建议先为新安装的虚拟机创建 VMware 快照，再运行本项目。
 
@@ -12,7 +12,9 @@
 - 关闭 GNOME 息屏、锁屏、自动挂起，以及系统休眠相关 target。
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
 - 安装 `open-vm-tools`、`open-vm-tools-desktop`，支持 Windows 与 Ubuntu 桌面之间复制粘贴。
-- 自动检查并只安装缺失的软件包，默认安装 Docker，并预装 PC/SC、CCID、Python 原生扩展和容器构建工具链。
+- 校验发布者 OpenPGP 主指纹后配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker 官方/维护者 APT 源，更新索引并安装或升级工具链。
+- 默认使用不会主动移除软件包的 `apt-get upgrade --with-new-pkgs` 更新现有 APT 包，并安装 Docker CE、Compose 与 Buildx。
+- 可配置目标用户免密 sudo，默认开启；规则单独写入并通过 `visudo` 校验，可随时关闭或回滚。
 - 安装 Codex CLI，并可配置指向 CPA `/v1` Responses API 的自定义 Provider；在 Ubuntu 24.04 上自动准备 bubblewrap/AppArmor sandbox。
 - 保存分阶段状态、受保护日志和配置备份，支持检查与回滚。
 
@@ -116,6 +118,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 远程入口会先安装缺失的 Git、curl、Python、证书或网络基础命令，把仓库克隆或快进更新到 `~/vmware-ubuntu-bootstrap`，再启动仓库内的交互安装器。请以普通 Ubuntu 用户运行这条命令，不要在前面添加 `sudo`；安装器会在需要时自行提权。
 
+即使选择开启免密 sudo，首次运行仍需要输入一次 Ubuntu 用户密码完成初始提权；`sudo-policy` 阶段通过后，后续命令才可免密执行。
+
 通过 SSH 运行时，脚本会规范现有 Netplan YAML 权限、校验目标地址并写入固定网络，但不会立即切断当前 DHCP SSH 连接；固定地址会在重启时生效，不需要再回 VMware 控制台执行网络阶段。完整安装结束后运行：
 
 ```bash
@@ -148,7 +152,10 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,all_proxy,ALL_
 | UFW | 不开启 | 已经处于 active 状态时仍会添加 SSH 放行规则 |
 | 关闭 SSH 密码登录 | `N` | 首次安装保持 `N`；确认 Windows 公钥登录成功后才改为 `Y` |
 | Codex/CPA | 配置 | 可在交互中选择跳过 |
-| Docker | 安装 | 默认配置 daemon、root/用户 client、用户组和代理；可改为 `N` |
+| 上游 APT 源 | 开启 | 新版 Git、gh、Git LFS、CMake；Docker 启用时增加 Docker 官方源 |
+| 升级现有 APT 包 | 开启 | 使用 `upgrade --with-new-pkgs`，不会为升级主动移除包 |
+| Docker | 安装 | 默认安装 Docker CE、Compose、Buildx，配置 daemon、用户组和代理 |
+| 免密 sudo | 开启 | 为目标用户写入独立 `NOPASSWD` 规则；安全要求较高时改为 `N` |
 
 CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存到用户目录下权限为 `600` 的文件，不写入 TOML、日志或 Git。
 公网 CPA 地址必须使用 HTTPS，避免 API key 在网络中明文传输；HTTP 只允许回环地址、`.local` 或明确的私有局域网 IP。
@@ -157,9 +164,19 @@ CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存
 CPA Provider 会直接写入当前用户的 `~/.codex/config.toml`，安装完成后使用标准命令 `codex`；项目不要求额外的包装命令。
 启用 Codex 时会按照 [OpenAI Linux sandbox 指南](https://developers.openai.com/codex/sandboxing) 安装 `bubblewrap`、`apparmor-profiles` 和 `apparmor-utils`，复制并加载 Ubuntu 24.04 的 `bwrap-userns-restrict` profile，再执行不调用 API 的本地 sandbox 验证。
 
-Docker Engine 默认安装，包含 Docker daemon、CLI、用户组和代理配置；如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW 与关闭 SSH 密码登录在各自配置分类中独立选择。
+Docker Engine 默认从 Docker 官方源安装，包含 daemon、CLI、Compose、Buildx、用户组和代理配置；如检测到 Ubuntu `docker.io`，APT 会在同一事务中迁移到 Docker CE，不主动删除 `/var/lib/docker`。如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW、关闭 SSH 密码登录与免密 sudo 在各自配置分类中独立选择。
 
-完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，再通过 `dpkg-query` 检查并安装其余缺失包，已安装的软件不会重复下载。为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链包含 Docker、Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 按该项目的正式安装方式使用固定 Node 容器构建，不要求宿主机另装 Node/npm。
+完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，配置带 `signed-by` 的独立软件源、更新索引、升级现有包，再安装或升级完整工具链。受管源包括 [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)、[Git Core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa)、[Git LFS](https://packagecloud.io/github/git-lfs)、[Kitware APT](https://apt.kitware.com/) 和启用 Docker 时的 [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)；不使用已弃用的 `apt-key` 或 `curl | bash`。其余 Ubuntu 系统库继续跟随 24.04 的安全维护版本，不盲目混用第三方仓库。
+
+为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链还包含 Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 按该项目的正式安装方式使用固定 Node 容器构建，不要求宿主机另装 Node/npm。
+
+免密 sudo 默认开启，文件为 `/etc/sudoers.d/90-vmware-ubuntu-bootstrap-passwordless`，权限为 `root:root:440`。这适合专用开发虚拟机，但意味着该用户上下文中的任意程序都可以无提示取得 root 权限；共享环境或运行不可信代码时应在交互中选择 `N`。
+
+脚本会安装最新版可用的 GitHub CLI，但不会代替用户登录 GitHub。安装结束后以普通用户执行下面的命令即可通过浏览器授权并固定使用 HTTPS，无需 SSH key：
+
+```bash
+gh auth login --hostname github.com --git-protocol https --web
+```
 
 ## 7. SSH 配置结果
 
@@ -218,6 +235,7 @@ sudo bash install.sh --phase proxy-off
 # 单独执行阶段
 sudo bash install.sh --phase dependencies
 sudo bash install.sh --phase packages
+sudo bash install.sh --phase sudo-policy
 sudo bash install.sh --phase static-network
 sudo bash install.sh --phase power
 sudo bash install.sh --phase ssh

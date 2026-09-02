@@ -241,7 +241,10 @@ emit_config() {
   printf 'CPA_BYPASS_PROXY=%s\n' "$(shell_quote "$CPA_BYPASS_PROXY")"
   printf 'RUN_CPA_SMOKE=%s\n' "$(shell_quote "$RUN_CPA_SMOKE")"
   printf 'RUN_CODEX_SMOKE=%s\n' "$(shell_quote "$RUN_CODEX_SMOKE")"
+  printf 'ENABLE_UPSTREAM_APT_SOURCES=%s\n' "$(shell_quote "$ENABLE_UPSTREAM_APT_SOURCES")"
+  printf 'UPGRADE_INSTALLED_PACKAGES=%s\n' "$(shell_quote "$UPGRADE_INSTALLED_PACKAGES")"
   printf 'INSTALL_DOCKER=%s\n' "$(shell_quote "$INSTALL_DOCKER")"
+  printf 'ENABLE_PASSWORDLESS_SUDO=%s\n' "$(shell_quote "$ENABLE_PASSWORDLESS_SUDO")"
 }
 
 bool_prompt() {
@@ -376,7 +379,7 @@ collect_config() {
   if [[ "$VUB_CONFIG_VERSION" == "1" ]]; then
     INSTALL_DOCKER="true"
   fi
-  VUB_CONFIG_VERSION="2"
+  VUB_CONFIG_VERSION="3"
 
   local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input="" model_key_file
   ui_section "基础信息"
@@ -450,8 +453,15 @@ collect_config() {
   fi
 
   ui_section "组件"
-  ui_info "Docker Engine 默认安装，包含 daemon、CLI、用户权限和代理配置。"
+  ui_info "上游源提供新版 Git、gh、Git LFS、CMake；Docker 启用时使用 Docker CE 官方源。"
+  ENABLE_UPSTREAM_APT_SOURCES="$(bool_prompt "启用维护者/官方上游 APT 源" "$ENABLE_UPSTREAM_APT_SOURCES")"
+  UPGRADE_INSTALLED_PACKAGES="$(bool_prompt "升级当前已安装的 APT 软件包" "$UPGRADE_INSTALLED_PACKAGES")"
+  ui_info "Docker Engine 默认安装，包含 daemon、CLI、Compose、用户权限和代理配置。"
   INSTALL_DOCKER="$(bool_prompt "安装 Docker" "$INSTALL_DOCKER")"
+
+  ui_section "sudo 权限"
+  ui_info "免密 sudo 方便自动化，但该用户下运行的任意程序也可直接取得 root 权限。"
+  ENABLE_PASSWORDLESS_SUDO="$(bool_prompt "为 $REAL_USER 开启免密 sudo" "$ENABLE_PASSWORDLESS_SUDO")"
   validate_config
 }
 
@@ -484,7 +494,10 @@ show_summary() {
   DNS：         $DNS_SERVERS
   SSH：         tcp/$SSH_PORT，UFW=$ENABLE_UFW
   Codex：       $CONFIGURE_CODEX，CPA=${CPA_BASE_URL:-未配置}，模型=${CPA_MODEL_ID:-未配置}
+  上游 APT 源： $ENABLE_UPSTREAM_APT_SOURCES
+  升级现有包：  $UPGRADE_INSTALLED_PACKAGES
   Docker：      $INSTALL_DOCKER
+  免密 sudo：   $ENABLE_PASSWORDLESS_SUDO
   API key：     <redacted>
 EOF
 }

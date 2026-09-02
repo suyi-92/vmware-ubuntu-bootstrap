@@ -112,16 +112,26 @@ class ConfigRenderingTests(unittest.TestCase):
         install_script = (ROOT / "install.sh").read_text(encoding="utf-8")
         bootstrap = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
         packages = (ROOT / "scripts" / "03-packages.sh").read_text(encoding="utf-8")
+        repositories = (ROOT / "scripts" / "apt-repositories.sh").read_text(
+            encoding="utf-8"
+        )
+        sudo_policy = (ROOT / "scripts" / "03-sudo-policy.sh").read_text(
+            encoding="utf-8"
+        )
         proxy = (ROOT / "scripts" / "02-proxy.sh").read_text(encoding="utf-8")
         shell_library = (ROOT / "scripts" / "00-lib.sh").read_text(encoding="utf-8")
         example = (ROOT / "config.example.env").read_text(encoding="utf-8")
         self.assertIn("ensure_startup_dependencies", bootstrap)
         self.assertIn("scripts/00-dependencies.sh", bootstrap)
         self.assertIn(': "${INSTALL_DOCKER:=true}"', shell_library)
+        self.assertIn(': "${ENABLE_UPSTREAM_APT_SOURCES:=true}"', shell_library)
+        self.assertIn(': "${UPGRADE_INSTALLED_PACKAGES:=true}"', shell_library)
+        self.assertIn(': "${ENABLE_PASSWORDLESS_SUDO:=true}"', shell_library)
         self.assertIn(': "${TIMEZONE:=America/New_York}"', shell_library)
-        self.assertIn('VUB_CONFIG_VERSION="2"', example)
+        self.assertIn('VUB_CONFIG_VERSION="3"', example)
         self.assertIn('TIMEZONE="America/New_York"', example)
         self.assertIn('INSTALL_DOCKER="true"', example)
+        self.assertIn('ENABLE_PASSWORDLESS_SUDO="true"', example)
         self.assertIn(
             'if [[ "$VUB_CONFIG_VERSION" == "1" ]]',
             (ROOT / "install.sh").read_text(encoding="utf-8"),
@@ -138,6 +148,30 @@ class ConfigRenderingTests(unittest.TestCase):
             "apparmor-utils",
         ):
             self.assertIn(package, packages)
+        for package in (
+            "gh",
+            "docker-ce",
+            "docker-buildx-plugin",
+            "docker-compose-plugin",
+        ):
+            self.assertIn(package, packages)
+        for source in (
+            "https://cli.github.com/packages",
+            "https://ppa.launchpadcontent.net/git-core/ppa/ubuntu",
+            "https://packagecloud.io/github/git-lfs/ubuntu/",
+            "https://apt.kitware.com/ubuntu/",
+            "https://download.docker.com/linux/ubuntu",
+        ):
+            self.assertIn(source, repositories)
+        self.assertNotIn("apt-key", repositories)
+        self.assertIn("verify_openpgp_primary_fingerprints", repositories)
+        self.assertIn("activate_docker_runtime", packages)
+        self.assertIn("verify_docker_runtime", packages)
+        self.assertIn("systemctl start docker.socket", shell_library)
+        self.assertIn("systemctl restart docker.service", shell_library)
+        self.assertIn("NOPASSWD: ALL", shell_library)
+        self.assertIn('visudo -cf "$sudoers_tmp"', sudo_policy)
+        self.assertIn("sudo-policy", bootstrap)
         self.assertIn("all_proxy", proxy)
         self.assertIn("host.docker.internal", proxy)
         self.assertIn(

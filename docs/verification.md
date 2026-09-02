@@ -26,6 +26,40 @@ snap get system proxy.http 2>/dev/null || true
 
 Docker 默认安装。daemon 的代理用于拉取镜像；root/普通用户的 Docker client 配置会把代理传给 `docker build` 和新建容器，因此容器内的 npm、pip、curl 等常见下载工具也能沿用代理。
 
+Docker CE 的 service 使用 systemd socket activation，因此需要同时验证 socket、service 和 daemon API：
+
+```bash
+systemctl is-enabled docker.socket docker.service
+systemctl is-active docker.socket docker.service
+docker info
+```
+
+## APT 软件源与版本
+
+```bash
+grep -RHE '^(deb |URIs:)' /etc/apt/sources.list.d/{github-cli,git-core-ppa,github-git-lfs,kitware,docker}.{list,sources} 2>/dev/null
+apt-cache policy gh git git-lfs cmake docker-ce
+gh --version
+git --version
+git lfs version
+cmake --version
+docker compose version
+docker buildx version
+apt list --upgradable
+```
+
+源文件应使用各自 `/etc/apt/keyrings/` 下的 `signed-by` 密钥，不应出现 `apt-key`。默认升级完成后，`apt list --upgradable` 通常为空；被 hold 的包或需要管理员决策的升级可能仍会保留。
+
+## sudo 策略
+
+```bash
+sudo visudo -cf /etc/sudoers
+sudo stat -c '%U:%G:%a %n' /etc/sudoers.d/90-vmware-ubuntu-bootstrap-passwordless
+sudo -n true
+```
+
+启用免密 sudo 时文件应为 `root:root:440`，且 `sudo -n true` 无提示成功。关闭该选项时，本项目管理的 passwordless 文件应不存在；其他管理员自行维护的 sudoers 规则不受影响。
+
 ## 固定网络
 
 ```bash

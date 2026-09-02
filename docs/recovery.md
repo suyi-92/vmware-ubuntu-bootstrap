@@ -5,7 +5,8 @@
 - 每个会改文件的阶段先在 `/var/backups/vmware-ubuntu-bootstrap/` 建立快照。
 - 当前阶段失败时，入口会尝试恢复该阶段受管文件。
 - 通过 SSH 安装时只写入并校验固定网络，重启前不会改变当前连接；直接在控制台应用时使用 `netplan try --timeout 120`，未确认则自动恢复网络。
-- 软件包安装本身不可通用回滚；`packages` 回滚只恢复 hostname、时间等受管配置，不自动卸载包。
+- 软件包安装本身不可通用回滚；`packages` 回滚会恢复受管 APT 源、密钥、hostname 和时间配置，但不会降级或卸载已经更新的软件包，也不会自动把 Docker CE 迁回 `docker.io`。
+- `sudo-policy` 回滚会恢复执行前的受管 sudoers 文件；关闭免密 sudo 也只移除本项目管理的规则。
 
 ## 查看备份
 
@@ -27,6 +28,22 @@ sudo bash install.sh --rollback 20260831-210000-static-network
 ```
 
 回滚前会再保存一次当前状态，因此可以撤销一次误回滚。
+
+## Docker CE 迁移后启动救援
+
+如果从 Ubuntu `docker.io` 迁移到 Docker CE 后出现 `no sockets found via socket activation`，先恢复 socket 再启动 service：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl reset-failed docker.service docker.socket
+sudo systemctl enable --now docker.socket
+sudo systemctl enable docker.service
+sudo systemctl restart docker.service
+systemctl status docker.socket docker.service --no-pager
+docker info
+```
+
+这些命令不会删除 `/var/lib/docker` 中的镜像、容器或 volume。恢复后重新执行 `sudo bash install.sh --phase packages`，脚本只有在 `docker.socket`、`docker.service` 和 `docker info` 全部验收通过后才会把阶段标记为完成。
 
 ## 网络救援
 

@@ -35,12 +35,16 @@ export VUB_LOG_FILE=""
 source "$ROOT/scripts/00-lib.sh"
 
 install_missing_apt_packages "测试依赖安装" git curl ca-certificates
+upgrade_installed_apt_packages
+install_or_upgrade_apt_packages "测试升级安装" gh git-lfs
 
 grep -Fxq 'update' "$APT_LOG"
 grep -Fq 'install -y --no-install-recommends curl' "$APT_LOG"
-if grep -Eq 'install .*git|install .*ca-certificates' "$APT_LOG"; then
+if grep -Eq '^install .* (git|ca-certificates)( |$)' "$APT_LOG"; then
   echo "FAIL: 已安装的软件包被重复传给 apt-get" >&2
   exit 1
 fi
+grep -Fxq 'upgrade -y --with-new-pkgs' "$APT_LOG"
+grep -Fq 'install -y --no-install-recommends gh git-lfs' "$APT_LOG"
 
 echo "dependency install: PASS"

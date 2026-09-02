@@ -4,6 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
+# shellcheck source=apt-repositories.sh
+source "$SCRIPT_DIR/apt-repositories.sh"
 
 require_root
 load_config false
@@ -60,11 +62,26 @@ fi
 echo
 
 echo "=== Services ==="
-for unit in open-vm-tools.service ssh.socket ssh.service sshd.service docker.service; do
+for unit in open-vm-tools.service ssh.socket ssh.service sshd.service docker.socket docker.service; do
   if systemctl list-unit-files "$unit" 2>/dev/null | grep -q "^${unit}"; then
     printf '%-24s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || true)"
   fi
 done
+echo
+
+echo "=== APT / developer tools ==="
+if [[ -f "$GITHUB_CLI_SOURCE" && -f "$GIT_CORE_SOURCE" \
+    && -f "$GIT_LFS_SOURCE" && -f "$KITWARE_SOURCE" ]]; then
+  echo "upstream sources: configured"
+else
+  echo "upstream sources: incomplete or disabled"
+fi
+printf '%-12s %s\n' git "$(git --version 2>/dev/null || echo missing)"
+printf '%-12s %s\n' gh "$(gh --version 2>/dev/null | head -n1 || echo missing)"
+printf '%-12s %s\n' git-lfs "$(git lfs version 2>/dev/null || echo missing)"
+printf '%-12s %s\n' cmake "$(cmake --version 2>/dev/null | head -n1 || echo missing)"
+upgradable_count="$(apt list --upgradable 2>/dev/null | tail -n +2 | sed '/^[[:space:]]*$/d' | wc -l)"
+echo "APT upgrades: ${upgradable_count:-unknown}"
 echo
 
 echo "=== VMware clipboard ==="
@@ -101,6 +118,15 @@ echo
 echo "=== SSH ==="
 echo "port: ${SSH_PORT:-22}"
 [[ -f "$REAL_HOME/.ssh/authorized_keys" ]] && echo "authorized_keys: present" || echo "authorized_keys: missing"
+echo
+
+echo "=== sudo policy ==="
+passwordless_file="${VUB_PASSWORDLESS_SUDOERS_FILE:-/etc/sudoers.d/90-vmware-ubuntu-bootstrap-passwordless}"
+if [[ -f "$passwordless_file" ]]; then
+  echo "passwordless sudo: enabled ($(stat -c '%U:%G:%a' "$passwordless_file" 2>/dev/null || echo invalid))"
+else
+  echo "passwordless sudo: disabled"
+fi
 echo
 
 echo "=== Codex / CPA ==="

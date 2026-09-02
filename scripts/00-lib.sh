@@ -195,6 +195,84 @@ install_missing_apt_packages() {
     apt-get install -y --no-install-recommends "${missing[@]}"
 }
 
+upgrade_installed_apt_packages() {
+  require_command apt-get
+  run_logged "升级当前已安装的 APT 软件包" \
+    env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --with-new-pkgs
+}
+
+install_or_upgrade_apt_packages() {
+  local description="$1"
+  shift
+  (( $# > 0 )) || die "$description 没有收到软件包列表。"
+  require_command apt-get
+  run_logged "$description" env DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends "$@"
+}
+
+verify_docker_runtime() {
+  if is_dry_run; then
+    info "DRY-RUN: verify docker.socket, docker.service and docker info"
+    return 0
+  fi
+
+  require_command systemctl
+  require_command docker
+  if ! systemctl is-enabled --quiet docker.socket; then
+    die "Docker socket 未设为开机启用。"
+  fi
+  if ! systemctl is-active --quiet docker.socket; then
+    die "Docker socket 未运行。"
+  fi
+  if ! systemctl is-enabled --quiet docker.service; then
+    die "Docker service 未设为开机启用。"
+  fi
+  if ! systemctl is-active --quiet docker.service; then
+    die "Docker service 未运行。"
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    die "Docker daemon 无法响应 docker info。"
+  fi
+}
+
+activate_docker_runtime() {
+  if ! is_dry_run; then
+    require_command systemctl
+    require_command docker
+  fi
+
+  if ! run systemctl daemon-reload; then
+    die "systemd 重新加载失败，无法启动 Docker。"
+  fi
+  if ! run systemctl reset-failed docker.service docker.socket; then
+    die "无法清除 Docker service/socket 的失败状态。"
+  fi
+  if ! run systemctl enable docker.socket docker.service; then
+    die "无法将 Docker service/socket 设为开机启用。"
+  fi
+  if ! run systemctl start docker.socket; then
+    die "Docker socket 启动失败。"
+  fi
+  if ! run systemctl restart docker.service; then
+    die "Docker service 启动失败；请查看 journalctl -xeu docker.service。"
+  fi
+
+  verify_docker_runtime
+}
+
+validate_sudoers_username() {
+  local username="$1"
+  [[ "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]
+}
+
+render_passwordless_sudoers() {
+  local username="$1"
+  validate_sudoers_username "$username" \
+    || die "无法为不安全的用户名生成 sudoers 规则：$username"
+  printf '# Managed by vmware-ubuntu-bootstrap.\n'
+  printf '%s ALL=(ALL:ALL) NOPASSWD: ALL\n' "$username"
+}
+
 resolve_real_user() {
   local candidate="${TARGET_USER:-}"
   if [[ -z "$candidate" || "$candidate" == "root" ]]; then
@@ -381,7 +459,10 @@ apply_config_defaults() {
   : "${CPA_BYPASS_PROXY:=false}"
   : "${RUN_CPA_SMOKE:=true}"
   : "${RUN_CODEX_SMOKE:=true}"
+  : "${ENABLE_UPSTREAM_APT_SOURCES:=true}"
+  : "${UPGRADE_INSTALLED_PACKAGES:=true}"
   : "${INSTALL_DOCKER:=true}"
+  : "${ENABLE_PASSWORDLESS_SUDO:=true}"
 }
 
 load_config() {
@@ -455,7 +536,10 @@ validate_config() {
   validate_bool CPA_BYPASS_PROXY
   validate_bool RUN_CPA_SMOKE
   validate_bool RUN_CODEX_SMOKE
+  validate_bool ENABLE_UPSTREAM_APT_SOURCES
+  validate_bool UPGRADE_INSTALLED_PACKAGES
   validate_bool INSTALL_DOCKER
+  validate_bool ENABLE_PASSWORDLESS_SUDO
   [[ "$STATIC_IPV4_PREFIX" == "192.168.1" ]] || die "首版 STATIC_IPV4_PREFIX 必须为 192.168.1。"
   [[ "$STATIC_IPV4_LAST_OCTET" =~ ^[0-9]+$ ]] || die "静态 IP 末位必须是数字。"
   (( STATIC_IPV4_LAST_OCTET >= 2 && STATIC_IPV4_LAST_OCTET <= 254 )) \

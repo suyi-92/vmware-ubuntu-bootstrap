@@ -4,6 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
+# shellcheck source=apt-repositories.sh
+source "$SCRIPT_DIR/apt-repositories.sh"
 
 start_phase "validate"
 require_root
@@ -69,6 +71,19 @@ apt-config dump 2>/dev/null | grep -Fq "$EXPECTED_PROXY" || die "APT 代理验�
 visudo -cf /etc/sudoers >/dev/null || die "sudoers 语法验收失败。"
 grep -Fq 'all_proxy ALL_PROXY' /etc/sudoers.d/90-vmware-ubuntu-bootstrap-proxy-env \
   || die "sudo 代理环境保留规则验收失败。"
+
+PASSWORDLESS_SUDOERS_FILE="${VUB_PASSWORDLESS_SUDOERS_FILE:-/etc/sudoers.d/90-vmware-ubuntu-bootstrap-passwordless}"
+if is_true "$ENABLE_PASSWORDLESS_SUDO"; then
+  [[ -f "$PASSWORDLESS_SUDOERS_FILE" && ! -L "$PASSWORDLESS_SUDOERS_FILE" ]] \
+    || die "免密 sudoers 文件不存在或不安全。"
+  [[ "$(stat -c '%U:%G:%a' "$PASSWORDLESS_SUDOERS_FILE")" == "root:root:440" ]] \
+    || die "免密 sudoers 文件权限验收失败。"
+  grep -Fxq "$REAL_USER ALL=(ALL:ALL) NOPASSWD: ALL" "$PASSWORDLESS_SUDOERS_FILE" \
+    || die "免密 sudoers 规则验收失败。"
+  runuser -u "$REAL_USER" -- sudo -n true || die "普通用户免密 sudo 验收失败。"
+elif [[ -e "$PASSWORDLESS_SUDOERS_FILE" || -L "$PASSWORDLESS_SUDOERS_FILE" ]]; then
+  die "配置已关闭免密 sudo，但本项目管理的 sudoers 文件仍存在。"
+fi
 systemctl show-environment 2>/dev/null | grep -Fxq "ALL_PROXY=$EXPECTED_PROXY" \
   || die "systemd ALL_PROXY 验收失败。"
 
@@ -79,9 +94,26 @@ if command -v snap >/dev/null 2>&1; then
     || die "Snap HTTPS 代理验收失败。"
 fi
 
+if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
+  required_apt_paths=("${CORE_UPSTREAM_APT_PATHS[@]}")
+  is_true "$INSTALL_DOCKER" && required_apt_paths+=("${DOCKER_APT_PATHS[@]}")
+  for apt_path in "${required_apt_paths[@]}"; do
+    [[ -f "$apt_path" && ! -L "$apt_path" ]] \
+      || die "上游 APT 配置不存在或不安全：$apt_path"
+    [[ "$(stat -c '%U:%G:%a' "$apt_path")" == "root:root:644" ]] \
+      || die "上游 APT 配置权限验收失败：$apt_path"
+  done
+fi
+command -v gh >/dev/null 2>&1 || die "GitHub CLI 未安装。"
+git lfs version >/dev/null 2>&1 || die "Git LFS 不可用。"
+cmake --version >/dev/null 2>&1 || die "CMake 不可用。"
+
 if is_true "$INSTALL_DOCKER"; then
   command -v docker >/dev/null 2>&1 || die "Docker CLI 未安装。"
-  systemctl is-active --quiet docker || die "Docker daemon 未运行。"
+  systemctl is-enabled --quiet docker.socket || die "Docker socket 未设为开机启用。"
+  systemctl is-active --quiet docker.socket || die "Docker socket 未运行。"
+  systemctl is-enabled --quiet docker.service || die "Docker service 未设为开机启用。"
+  systemctl is-active --quiet docker.service || die "Docker daemon 未运行。"
   docker info >/dev/null 2>&1 || die "Docker daemon 不可用。"
   run_as_user docker info >/dev/null 2>&1 || die "普通用户无权访问 Docker daemon。"
   DOCKER_ENVIRONMENT="$(systemctl show docker --property=Environment --value 2>/dev/null || true)"

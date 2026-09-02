@@ -4,17 +4,37 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
+# shellcheck source=apt-repositories.sh
+source "$SCRIPT_DIR/apt-repositories.sh"
 
 start_phase "packages"
 require_root
 load_config true
 resolve_real_user
+validate_config
 load_proxy_state || warn "尚无持久化代理状态；APT 将使用当前环境或直连。"
 
 require_command apt-get
 
+install_missing_apt_packages "安装 APT 软件源管理依赖" \
+  ca-certificates curl gnupg
+
+if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
+  info "配置 GitHub CLI、Git/Git LFS、Kitware 与 Docker（如启用）软件源。"
+  configure_upstream_apt_sources
+else
+  info "未启用上游 APT 源，将使用 Ubuntu 24.04 仓库版本。"
+  remove_upstream_apt_sources
+fi
+
+run_logged "更新全部 APT 软件源索引" \
+  env DEBIAN_FRONTEND=noninteractive apt-get update
+if is_true "$UPGRADE_INSTALLED_PACKAGES"; then
+  upgrade_installed_apt_packages
+fi
+
 PACKAGES=(
-  git curl wget ca-certificates openssh-server
+  git gh git-lfs curl wget ca-certificates openssh-server
   open-vm-tools open-vm-tools-desktop
   jq python3 python3-venv python3-pip python3-dev pipx
   build-essential pkg-config
@@ -22,7 +42,7 @@ PACKAGES=(
   gnupg lsb-release software-properties-common
   iproute2 iputils-ping iputils-arping dnsutils traceroute
   net-tools ethtool procps
-  vim nano tmux htop tree ripgrep fd-find git-lfs bash-completion shellcheck ufw
+  vim nano tmux htop tree ripgrep fd-find bash-completion shellcheck ufw
 )
 
 # mdd-sim-gateway 的正式 Linux 安装链会在宿主机编译 pcsc-lite、CCID/vpcd、
@@ -41,10 +61,31 @@ if is_true "$CONFIGURE_CODEX"; then
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  PACKAGES+=(docker.io)
+  if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
+    PACKAGES+=(
+      docker-ce docker-ce-cli containerd.io
+      docker-buildx-plugin docker-compose-plugin
+    )
+    if dpkg-query -W -f='${Status}\n' docker.io 2>/dev/null \
+        | grep -Fxq 'install ok installed'; then
+      warn "检测到 Ubuntu docker.io；APT 将原子迁移到 Docker CE，现有 /var/lib/docker 数据不会被主动删除。"
+    fi
+  else
+    PACKAGES+=(docker.io)
+  fi
 fi
 
-install_missing_apt_packages "安装常用、运行与构建软件包" "${PACKAGES[@]}"
+install_or_upgrade_apt_packages "安装或升级常用、运行与构建软件包" "${PACKAGES[@]}"
+
+run_as_user git lfs install --skip-repo
+
+if is_dry_run; then
+  info "DRY-RUN: verify gh, Git LFS and CMake"
+else
+  command -v gh >/dev/null 2>&1 || die "GitHub CLI 安装失败。"
+  git lfs version >/dev/null 2>&1 || die "Git LFS 安装失败。"
+  cmake --version >/dev/null 2>&1 || die "CMake 安装失败。"
+fi
 
 if is_dry_run; then
   info "DRY-RUN: verify open-vm-tools desktop clipboard integration"
@@ -88,7 +129,17 @@ if systemctl list-unit-files open-vm-tools.service 2>/dev/null | grep -q '^open-
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  run systemctl enable --now docker
+  if is_true "$ENABLE_UPSTREAM_APT_SOURCES" && ! is_dry_run; then
+    for docker_package in docker-ce docker-ce-cli containerd.io \
+      docker-buildx-plugin docker-compose-plugin; do
+      dpkg-query -W -f='${Status}\n' "$docker_package" 2>/dev/null \
+        | grep -Fxq 'install ok installed' \
+        || die "Docker 官方软件包安装失败：$docker_package"
+    done
+  fi
+  # Docker CE 通过 -H fd:// 从 docker.socket 获取 API listener。docker.io
+  # 迁移后显式 reload 并先启动 socket，避免 service 找不到 listener。
+  activate_docker_runtime
   if ! id -nG "$REAL_USER" | tr ' ' '\n' | grep -Fxq docker; then
     run usermod -aG docker "$REAL_USER"
     warn "已把 $REAL_USER 加入 docker 组；重新登录后生效。"
@@ -115,7 +166,16 @@ if is_true "$INSTALL_DOCKER" && [[ -r "$VUB_ETC_DIR/proxy.env" ]]; then
   VUB_BACKUP_DIR="" VUB_PHASE_NAME="proxy-post-docker" bash "$SCRIPT_DIR/02-proxy.sh" apply
 fi
 
+if is_true "$INSTALL_DOCKER"; then
+  # 代理阶段会重载并重启 Docker；只有最终存活检查通过才能完成阶段。
+  verify_docker_runtime
+  if ! is_dry_run && ! run_as_user docker info >/dev/null 2>&1; then
+    die "用户 $REAL_USER 无法访问 Docker daemon。"
+  fi
+fi
+
 complete_backup
 record_reboot_required
-mark_phase complete "packages=${#PACKAGES[@]}"
+mark_phase complete \
+  "packages=${#PACKAGES[@]};upstream_sources=$ENABLE_UPSTREAM_APT_SOURCES;system_upgrade=$UPGRADE_INSTALLED_PACKAGES"
 info "软件包阶段完成。"

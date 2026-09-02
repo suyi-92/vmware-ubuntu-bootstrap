@@ -15,7 +15,7 @@ usage() {
 
 阶段：
   full, dependencies, preflight, proxy, proxy-status, proxy-off, packages,
-  static-network, power, ssh, codex, validate, status, rollback
+  sudo-policy, static-network, power, ssh, codex, validate, status, rollback
 EOF
 }
 
@@ -54,6 +54,7 @@ phase_script() {
     preflight) printf '%s\n' "$PROJECT_DIR/scripts/01-preflight.sh" ;;
     proxy|proxy-status|proxy-off) printf '%s\n' "$PROJECT_DIR/scripts/02-proxy.sh" ;;
     packages) printf '%s\n' "$PROJECT_DIR/scripts/03-packages.sh" ;;
+    sudo-policy) printf '%s\n' "$PROJECT_DIR/scripts/03-sudo-policy.sh" ;;
     static-network) printf '%s\n' "$PROJECT_DIR/scripts/04-static-network.sh" ;;
     power) printf '%s\n' "$PROJECT_DIR/scripts/05-power-policy.sh" ;;
     ssh) printf '%s\n' "$PROJECT_DIR/scripts/06-ssh.sh" ;;
@@ -105,7 +106,7 @@ handle_phase_failure() {
   export VUB_PHASE_NAME
   mark_phase failed "phase command failed" || true
   case "$phase" in
-    proxy|proxy-off|packages|static-network|power|ssh|codex)
+    proxy|proxy-off|packages|sudo-policy|static-network|power|ssh|codex)
       if [[ -r "$VUB_STATE_DIR/active-backup" && -f "$PROJECT_DIR/scripts/10-rollback.sh" ]]; then
         local active
         active="$(<"$VUB_STATE_DIR/active-backup")"
@@ -120,7 +121,7 @@ handle_phase_failure() {
 run_full() {
   local phase
   ensure_startup_dependencies || return 1
-  for phase in preflight proxy packages static-network power ssh codex validate; do
+  for phase in preflight proxy packages sudo-policy static-network power ssh codex validate; do
     if ! run_one_phase "$phase"; then
       handle_phase_failure "$phase"
       return 1
@@ -136,7 +137,7 @@ case "$PHASE" in
       exit 1
     fi
     ;;
-  preflight|proxy|packages|static-network|power|ssh|codex)
+  preflight|proxy|packages|sudo-policy|static-network|power|ssh|codex)
     ensure_startup_dependencies || exit 1
     if ! run_one_phase "$PHASE"; then
       handle_phase_failure "$PHASE"

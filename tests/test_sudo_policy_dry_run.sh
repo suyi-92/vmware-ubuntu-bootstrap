@@ -2,12 +2,12 @@
 set -Eeuo pipefail
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  echo "packages dry-run: SKIP (requires root)"
+  echo "sudo policy dry-run: SKIP (requires root)"
   exit 0
 fi
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-FIXTURE_ROOT="$(mktemp -d /tmp/vub-packages-test.XXXXXX)"
+FIXTURE_ROOT="$(mktemp -d /tmp/vub-sudo-policy-test.XXXXXX)"
 trap 'rm -rf -- "$FIXTURE_ROOT"' EXIT
 
 TARGET="${SUDO_USER:-}"
@@ -15,7 +15,7 @@ if [[ -z "$TARGET" || "$TARGET" == "root" ]]; then
   TARGET="$(getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}')"
 fi
 [[ -n "$TARGET" ]] || {
-  echo "packages dry-run: SKIP (no regular user)"
+  echo "sudo policy dry-run: SKIP (no regular user)"
   exit 0
 }
 
@@ -38,9 +38,9 @@ CPA_BYPASS_PROXY=false
 CONFIGURE_CODEX=false
 RUN_CPA_SMOKE=false
 RUN_CODEX_SMOKE=false
-ENABLE_UPSTREAM_APT_SOURCES=true
-UPGRADE_INSTALLED_PACKAGES=true
-INSTALL_DOCKER=true
+ENABLE_UPSTREAM_APT_SOURCES=false
+UPGRADE_INSTALLED_PACKAGES=false
+INSTALL_DOCKER=false
 ENABLE_PASSWORDLESS_SUDO=true
 EOF
 chmod 0600 "$CONFIG"
@@ -50,22 +50,22 @@ export VUB_ETC_DIR="$FIXTURE_ROOT/etc-state"
 export VUB_STATE_DIR="$FIXTURE_ROOT/state"
 export VUB_LOG_DIR="$FIXTURE_ROOT/log"
 export VUB_BACKUP_ROOT="$FIXTURE_ROOT/backups"
+export VUB_PASSWORDLESS_SUDOERS_FILE="$FIXTURE_ROOT/sudoers/passwordless"
 export VUB_DRY_RUN=true
 
-OUTPUT="$(bash "$ROOT/scripts/03-packages.sh" 2>&1)"
-grep -Fq '安装或升级常用、运行与构建软件包' <<<"$OUTPUT"
-grep -Fq 'GitHub CLI' <<<"$OUTPUT"
-grep -Fq 'systemctl daemon-reload' <<<"$OUTPUT"
-grep -Fq 'systemctl start docker.socket' <<<"$OUTPUT"
-grep -Fq 'systemctl restart docker.service' <<<"$OUTPUT"
-grep -Fq 'verify docker.socket, docker.service and docker info' <<<"$OUTPUT"
+OUTPUT="$(bash "$ROOT/scripts/03-sudo-policy.sh" 2>&1)"
 grep -Fq 'DRY-RUN' <<<"$OUTPUT"
+grep -Fq "已为 $TARGET 开启免密 sudo" <<<"$OUTPUT"
+[[ ! -e "$VUB_PASSWORDLESS_SUDOERS_FILE" ]] || {
+  echo "FAIL: sudo policy dry-run wrote sudoers file" >&2
+  exit 1
+}
 
 for path in "$VUB_ETC_DIR" "$VUB_STATE_DIR" "$VUB_LOG_DIR" "$VUB_BACKUP_ROOT"; do
   [[ ! -e "$path" ]] || {
-    echo "FAIL: packages dry-run created $path" >&2
+    echo "FAIL: sudo policy dry-run created $path" >&2
     exit 1
   }
 done
 
-echo "packages dry-run: PASS"
+echo "sudo policy dry-run: PASS"

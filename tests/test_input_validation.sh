@@ -32,7 +32,10 @@ CONFIRM_SSH_KEY_LOGIN=false
 CPA_BYPASS_PROXY=false
 RUN_CPA_SMOKE=false
 RUN_CODEX_SMOKE=false
+ENABLE_UPSTREAM_APT_SOURCES=false
+UPGRADE_INSTALLED_PACKAGES=false
 INSTALL_DOCKER=false
+ENABLE_PASSWORDLESS_SUDO=true
 STATIC_IPV4_PREFIX="192.168.1"
 STATIC_IPV4_LAST_OCTET="254"
 PREFIX_LENGTH="24"
@@ -43,7 +46,9 @@ HOSTNAME="a"
 export CONFIGURE_CODEX CONFIGURE_STATIC_NETWORK
 export ENABLE_UFW DISABLE_SSH_PASSWORD CONFIRM_SSH_KEY_LOGIN
 export CPA_BYPASS_PROXY
-export RUN_CPA_SMOKE RUN_CODEX_SMOKE INSTALL_DOCKER
+export RUN_CPA_SMOKE RUN_CODEX_SMOKE
+export ENABLE_UPSTREAM_APT_SOURCES UPGRADE_INSTALLED_PACKAGES
+export INSTALL_DOCKER ENABLE_PASSWORDLESS_SUDO
 export STATIC_IPV4_PREFIX STATIC_IPV4_LAST_OCTET PREFIX_LENGTH
 export PROXY_PORT SSH_PORT NETWORK_INTERFACE HOSTNAME
 validate_config
@@ -57,6 +62,21 @@ STATIC_IPV4_LAST_OCTET="254"
 NETWORK_INTERFACE='ens33: bad'
 if (validate_config >/dev/null 2>&1); then
   fail "unsafe interface name was accepted"
+fi
+
+validate_sudoers_username "suyi" || fail "normal sudoers username was rejected"
+if validate_sudoers_username 'bad user'; then
+  fail "unsafe sudoers username was accepted"
+fi
+
+if command -v visudo >/dev/null 2>&1; then
+  SUDOERS_FIXTURE="$(mktemp)"
+  render_passwordless_sudoers "suyi" >"$SUDOERS_FIXTURE"
+  visudo -cf "$SUDOERS_FIXTURE" >/dev/null \
+    || fail "rendered passwordless sudoers rule is invalid"
+  grep -Fxq 'suyi ALL=(ALL:ALL) NOPASSWD: ALL' "$SUDOERS_FIXTURE" \
+    || fail "rendered passwordless sudoers rule is incomplete"
+  rm -f "$SUDOERS_FIXTURE"
 fi
 
 SOCKET_RENDERED="$(render_template "$ROOT/templates/ssh-socket.conf.tpl" "SSH_PORT=2222")"
