@@ -137,6 +137,9 @@ class ConfigRenderingTests(unittest.TestCase):
             (ROOT / "install.sh").read_text(encoding="utf-8"),
         )
         for package in (
+            "nodejs",
+            "npm",
+            "node-gyp",
             "meson",
             "ninja-build",
             "libpcsclite-dev",
@@ -167,6 +170,9 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("verify_openpgp_primary_fingerprints", repositories)
         self.assertIn("activate_docker_runtime", packages)
         self.assertIn("verify_docker_runtime", packages)
+        self.assertIn("node --version", packages)
+        self.assertIn("npm --version", packages)
+        self.assertIn("npx --version", packages)
         self.assertIn("systemctl start docker.socket", shell_library)
         self.assertIn("systemctl restart docker.service", shell_library)
         self.assertIn("NOPASSWD: ALL", shell_library)

@@ -13,6 +13,7 @@
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
 - 安装 `open-vm-tools`、`open-vm-tools-desktop`，支持 Windows 与 Ubuntu 桌面之间复制粘贴。
 - 校验发布者 OpenPGP 主指纹后配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker 官方/维护者 APT 源，更新索引并安装或升级工具链。
+- 默认安装 Node.js、npm、npx 与 node-gyp，配合现有编译工具支持 WebUI 本地开发和 npm 原生模块构建。
 - 默认使用不会主动移除软件包的 `apt-get upgrade --with-new-pkgs` 更新现有 APT 包，并安装 Docker CE、Compose 与 Buildx。
 - 可配置目标用户免密 sudo，默认开启；规则单独写入并通过 `visudo` 校验，可随时关闭或回滚。
 - 安装 Codex CLI，并可配置指向 CPA `/v1` Responses API 的自定义 Provider；在 Ubuntu 24.04 上自动准备 bubblewrap/AppArmor sandbox。
@@ -154,6 +155,7 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,all_proxy,ALL_
 | Codex/CPA | 配置 | 可在交互中选择跳过 |
 | 上游 APT 源 | 开启 | 新版 Git、gh、Git LFS、CMake；Docker 启用时增加 Docker 官方源 |
 | 升级现有 APT 包 | 开启 | 使用 `upgrade --with-new-pkgs`，不会为升级主动移除包 |
+| Node.js/npm 工具链 | 安装 | 安装 Node.js、npm、npx、node-gyp，并支持本地 WebUI 开发 |
 | Docker | 安装 | 默认安装 Docker CE、Compose、Buildx，配置 daemon、用户组和代理 |
 | 免密 sudo | 开启 | 为目标用户写入独立 `NOPASSWD` 规则；安全要求较高时改为 `N` |
 
@@ -168,7 +170,7 @@ Docker Engine 默认从 Docker 官方源安装，包含 daemon、CLI、Compose�
 
 完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，配置带 `signed-by` 的独立软件源、更新索引、升级现有包，再安装或升级完整工具链。受管源包括 [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)、[Git Core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa)、[Git LFS](https://packagecloud.io/github/git-lfs)、[Kitware APT](https://apt.kitware.com/) 和启用 Docker 时的 [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)；不使用已弃用的 `apt-key` 或 `curl | bash`。其余 Ubuntu 系统库继续跟随 24.04 的安全维护版本，不盲目混用第三方仓库。
 
-为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链还包含 Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 按该项目的正式安装方式使用固定 Node 容器构建，不要求宿主机另装 Node/npm。
+为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链还包含 Node.js/npm/node-gyp、Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 的正式安装仍使用固定 Node 容器构建，宿主机 Node/npm 则可用于本地开发、依赖检查及 npm 原生模块构建。
 
 免密 sudo 默认开启，文件为 `/etc/sudoers.d/90-vmware-ubuntu-bootstrap-passwordless`，权限为 `root:root:440`。这适合专用开发虚拟机，但意味着该用户上下文中的任意程序都可以无提示取得 root 权限；共享环境或运行不可信代码时应在交互中选择 `N`。
 

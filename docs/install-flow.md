@@ -64,7 +64,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 安装器会询问是否为目标用户开启免密 sudo，默认 `Y`。首次启动仍需输入一次 Ubuntu 用户密码；只有 `sudo-policy` 阶段成功写入并通过 `visudo` 校验后，后续运行才不再询问密码。
 
-本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装完整工具链。Docker 默认从官方源安装 Docker CE、Compose 和 Buildx。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
+本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装包含 Node.js、npm、npx 与 node-gyp 的完整工具链。Docker 默认从官方源安装 Docker CE、Compose 和 Buildx。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
 
 安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 只显示 `*` 掩码，真实字符不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。首次安装保持“关闭 SSH 密码登录”为 `N`，确认 Windows 公钥可以从另一终端登录后再改为 `Y`。公网 CPA `/v1` 地址必须使用 HTTPS。输入 key 后会请求 `/v1/models`：单模型自动采用，多模型按编号选择，已有模型作为默认项。
 

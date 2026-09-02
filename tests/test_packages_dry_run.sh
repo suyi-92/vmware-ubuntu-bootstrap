@@ -54,6 +54,8 @@ export VUB_DRY_RUN=true
 
 OUTPUT="$(bash "$ROOT/scripts/03-packages.sh" 2>&1)"
 grep -Fq '安装或升级常用、运行与构建软件包' <<<"$OUTPUT"
+grep -Fq 'nodejs npm node-gyp' <<<"$OUTPUT"
+grep -Fq 'verify gh, Git LFS, CMake, Node.js, npm and npx' <<<"$OUTPUT"
 grep -Fq 'GitHub CLI' <<<"$OUTPUT"
 grep -Fq 'systemctl daemon-reload' <<<"$OUTPUT"
 grep -Fq 'systemctl start docker.socket' <<<"$OUTPUT"

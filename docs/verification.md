@@ -38,11 +38,14 @@ docker info
 
 ```bash
 grep -RHE '^(deb |URIs:)' /etc/apt/sources.list.d/{github-cli,git-core-ppa,github-git-lfs,kitware,docker}.{list,sources} 2>/dev/null
-apt-cache policy gh git git-lfs cmake docker-ce
+apt-cache policy gh git git-lfs cmake nodejs npm node-gyp docker-ce
 gh --version
 git --version
 git lfs version
 cmake --version
+node --version
+npm --version
+npx --version
 docker compose version
 docker buildx version
 apt list --upgradable

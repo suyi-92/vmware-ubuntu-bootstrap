@@ -36,6 +36,7 @@ fi
 PACKAGES=(
   git gh git-lfs curl wget ca-certificates openssh-server
   open-vm-tools open-vm-tools-desktop
+  nodejs npm node-gyp
   jq python3 python3-venv python3-pip python3-dev pipx
   build-essential pkg-config
   unzip zip tar xz-utils rsync findutils diffutils
@@ -46,7 +47,8 @@ PACKAGES=(
 )
 
 # mdd-sim-gateway 的正式 Linux 安装链会在宿主机编译 pcsc-lite、CCID/vpcd、
-# pyscard 和 lpac；Engine 与 WebUI 由 Docker 构建，因此不需要宿主机 Node。
+# pyscard 和 lpac；Engine 与 WebUI 仍由 Docker 构建，宿主机 Node/npm 用于
+# WebUI 本地开发和 npm 原生模块构建。
 MDD_BUILD_PACKAGES=(
   autoconf automake cmake flex help2man libtool meson ninja-build patch perl swig
   libccid pcscd pcsc-tools vsmartcard-vpcd
@@ -80,11 +82,14 @@ install_or_upgrade_apt_packages "安装或升级常用、运行与构建软件�
 run_as_user git lfs install --skip-repo
 
 if is_dry_run; then
-  info "DRY-RUN: verify gh, Git LFS and CMake"
+  info "DRY-RUN: verify gh, Git LFS, CMake, Node.js, npm and npx"
 else
   command -v gh >/dev/null 2>&1 || die "GitHub CLI 安装失败。"
   git lfs version >/dev/null 2>&1 || die "Git LFS 安装失败。"
   cmake --version >/dev/null 2>&1 || die "CMake 安装失败。"
+  node --version >/dev/null 2>&1 || die "Node.js 安装失败。"
+  npm --version >/dev/null 2>&1 || die "npm 安装失败。"
+  npx --version >/dev/null 2>&1 || die "npx 安装失败。"
 fi
 
 if is_dry_run; then

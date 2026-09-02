@@ -107,6 +107,9 @@ fi
 command -v gh >/dev/null 2>&1 || die "GitHub CLI 未安装。"
 git lfs version >/dev/null 2>&1 || die "Git LFS 不可用。"
 cmake --version >/dev/null 2>&1 || die "CMake 不可用。"
+node --version >/dev/null 2>&1 || die "Node.js 不可用。"
+npm --version >/dev/null 2>&1 || die "npm 不可用。"
+npx --version >/dev/null 2>&1 || die "npx 不可用。"
 
 if is_true "$INSTALL_DOCKER"; then
   command -v docker >/dev/null 2>&1 || die "Docker CLI 未安装。"
