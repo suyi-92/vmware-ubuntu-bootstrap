@@ -244,6 +244,7 @@ emit_config() {
   printf 'ENABLE_UPSTREAM_APT_SOURCES=%s\n' "$(shell_quote "$ENABLE_UPSTREAM_APT_SOURCES")"
   printf 'UPGRADE_INSTALLED_PACKAGES=%s\n' "$(shell_quote "$UPGRADE_INSTALLED_PACKAGES")"
   printf 'INSTALL_DOCKER=%s\n' "$(shell_quote "$INSTALL_DOCKER")"
+  printf 'CONFIGURE_FCITX5_RIME=%s\n' "$(shell_quote "$CONFIGURE_FCITX5_RIME")"
   printf 'ENABLE_PASSWORDLESS_SUDO=%s\n' "$(shell_quote "$ENABLE_PASSWORDLESS_SUDO")"
 }
 
@@ -379,7 +380,7 @@ collect_config() {
   if [[ "$VUB_CONFIG_VERSION" == "1" ]]; then
     INSTALL_DOCKER="true"
   fi
-  VUB_CONFIG_VERSION="3"
+  VUB_CONFIG_VERSION="4"
 
   local detected_user detected_iface detected_ip detected_gateway detected_dns existing_key_file secret_file secret_exists="false" key_input="" model_key_file
   ui_section "基础信息"
@@ -458,6 +459,8 @@ collect_config() {
   UPGRADE_INSTALLED_PACKAGES="$(bool_prompt "升级当前已安装的 APT 软件包" "$UPGRADE_INSTALLED_PACKAGES")"
   ui_info "Docker Engine 默认安装，包含 daemon、CLI、Compose、用户权限和代理配置。"
   INSTALL_DOCKER="$(bool_prompt "安装 Docker" "$INSTALL_DOCKER")"
+  ui_info "Fcitx5/Rime 默认安装雾凇拼音，并让中文在登录后直接激活。"
+  CONFIGURE_FCITX5_RIME="$(bool_prompt "安装并配置 Fcitx5 + Rime + 雾凇拼音" "$CONFIGURE_FCITX5_RIME")"
 
   ui_section "sudo 权限"
   ui_info "免密 sudo 方便自动化，但该用户下运行的任意程序也可直接取得 root 权限。"
@@ -497,6 +500,7 @@ show_summary() {
   上游 APT 源： $ENABLE_UPSTREAM_APT_SOURCES
   升级现有包：  $UPGRADE_INSTALLED_PACKAGES
   Docker：      $INSTALL_DOCKER
+  中文输入法：  $CONFIGURE_FCITX5_RIME（Fcitx5/Rime/雾凇拼音）
   免密 sudo：   $ENABLE_PASSWORDLESS_SUDO
   API key：     <redacted>
 EOF

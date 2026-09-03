@@ -35,6 +35,7 @@ RUN_CODEX_SMOKE=false
 ENABLE_UPSTREAM_APT_SOURCES=false
 UPGRADE_INSTALLED_PACKAGES=false
 INSTALL_DOCKER=false
+CONFIGURE_FCITX5_RIME=true
 ENABLE_PASSWORDLESS_SUDO=true
 STATIC_IPV4_PREFIX="192.168.1"
 STATIC_IPV4_LAST_OCTET="254"
@@ -48,7 +49,7 @@ export ENABLE_UFW DISABLE_SSH_PASSWORD CONFIRM_SSH_KEY_LOGIN
 export CPA_BYPASS_PROXY
 export RUN_CPA_SMOKE RUN_CODEX_SMOKE
 export ENABLE_UPSTREAM_APT_SOURCES UPGRADE_INSTALLED_PACKAGES
-export INSTALL_DOCKER ENABLE_PASSWORDLESS_SUDO
+export INSTALL_DOCKER CONFIGURE_FCITX5_RIME ENABLE_PASSWORDLESS_SUDO
 export STATIC_IPV4_PREFIX STATIC_IPV4_LAST_OCTET PREFIX_LENGTH
 export PROXY_PORT SSH_PORT NETWORK_INTERFACE HOSTNAME
 validate_config
@@ -63,6 +64,13 @@ NETWORK_INTERFACE='ens33: bad'
 if (validate_config >/dev/null 2>&1); then
   fail "unsafe interface name was accepted"
 fi
+
+NETWORK_INTERFACE="ens33"
+CONFIGURE_FCITX5_RIME="maybe"
+if (validate_config >/dev/null 2>&1); then
+  fail "invalid Fcitx5/Rime boolean was accepted"
+fi
+CONFIGURE_FCITX5_RIME="true"
 
 validate_sudoers_username "suyi" || fail "normal sudoers username was rejected"
 if validate_sudoers_username 'bad user'; then

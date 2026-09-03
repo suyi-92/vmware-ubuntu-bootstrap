@@ -21,7 +21,7 @@ fi
 
 CONFIG="$FIXTURE_ROOT/config.env"
 cat >"$CONFIG" <<EOF
-VUB_CONFIG_VERSION=3
+VUB_CONFIG_VERSION=4
 TARGET_USER=$(printf '%q' "$TARGET")
 NETWORK_INTERFACE=""
 PROXY_PORT=7890
@@ -41,6 +41,7 @@ RUN_CODEX_SMOKE=false
 ENABLE_UPSTREAM_APT_SOURCES=true
 UPGRADE_INSTALLED_PACKAGES=true
 INSTALL_DOCKER=true
+CONFIGURE_FCITX5_RIME=true
 ENABLE_PASSWORDLESS_SUDO=true
 EOF
 chmod 0600 "$CONFIG"
@@ -55,6 +56,9 @@ export VUB_DRY_RUN=true
 OUTPUT="$(bash "$ROOT/scripts/03-packages.sh" 2>&1)"
 grep -Fq '安装或升级常用、运行与构建软件包' <<<"$OUTPUT"
 grep -Fq 'nodejs npm node-gyp' <<<"$OUTPUT"
+grep -Fq 'add-apt-repository --yes --no-update universe' <<<"$OUTPUT"
+grep -Fq 'fcitx5 fcitx5-rime fcitx5-config-qt' <<<"$OUTPUT"
+grep -Fq 'librime-plugin-lua librime-plugin-octagram librime-bin im-config' <<<"$OUTPUT"
 grep -Fq 'verify gh, Git LFS, CMake, Node.js, npm and npx' <<<"$OUTPUT"
 grep -Fq 'GitHub CLI' <<<"$OUTPUT"
 grep -Fq 'systemctl daemon-reload' <<<"$OUTPUT"

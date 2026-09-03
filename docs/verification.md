@@ -38,7 +38,7 @@ docker info
 
 ```bash
 grep -RHE '^(deb |URIs:)' /etc/apt/sources.list.d/{github-cli,git-core-ppa,github-git-lfs,kitware,docker}.{list,sources} 2>/dev/null
-apt-cache policy gh git git-lfs cmake nodejs npm node-gyp docker-ce
+apt-cache policy gh git git-lfs cmake nodejs npm node-gyp docker-ce fcitx5 fcitx5-rime librime-bin
 gh --version
 git --version
 git lfs version
@@ -52,6 +52,21 @@ apt list --upgradable
 ```
 
 源文件应使用各自 `/etc/apt/keyrings/` 下的 `signed-by` 密钥，不应出现 `apt-key`。默认升级完成后，`apt list --upgradable` 通常为空；被 hold 的包或需要管理员决策的升级可能仍会保留。
+
+## Fcitx5 / Rime / 雾凇拼音
+
+注销并重新登录 Ubuntu 图形桌面后执行：
+
+```bash
+grep -Fx 'run_im fcitx5' ~/.xinputrc
+grep -E '^(DefaultIM|ActiveByDefault)=' ~/.config/fcitx5/{profile,config}
+grep -A3 '^menu:' ~/.local/share/fcitx5/rime/build/default.yaml
+grep -A3 '^schema_list:' ~/.local/share/fcitx5/rime/build/default.yaml
+fcitx5-remote --check
+fcitx5-remote -n
+```
+
+结果应包含 `DefaultIM=rime`、`ActiveByDefault=True`、`page_size: 9`，且 `schema_list` 只有 `rime_ice`。`fcitx5-remote -n` 应显示 `rime`；实际输入 `shi` 应出现 9 个候选，`-` 为上一页、`=` 为下一页。配置中不得出现 `rime_ice_suggestion`。如果通过 SSH 验证时没有图形会话，`fcitx5-remote --check` 暂时失败是正常的，先在 Ubuntu 桌面注销并重新登录。
 
 ## sudo 策略
 

@@ -84,6 +84,53 @@ upgradable_count="$(apt list --upgradable 2>/dev/null | tail -n +2 | sed '/^[[:s
 echo "APT upgrades: ${upgradable_count:-unknown}"
 echo
 
+echo "=== Fcitx5 / Rime / 雾凇拼音 ==="
+if ! is_true "$CONFIGURE_FCITX5_RIME"; then
+  echo "configured: disabled"
+else
+  rime_dir="${VUB_RIME_DIR:-$REAL_HOME/.local/share/fcitx5/rime}"
+  fcitx_config_dir="${VUB_FCITX5_CONFIG_DIR:-$REAL_HOME/.config/fcitx5}"
+  fcitx_profile="${VUB_FCITX5_PROFILE:-$fcitx_config_dir/profile}"
+  fcitx_global_config="${VUB_FCITX5_GLOBAL_CONFIG:-$fcitx_config_dir/config}"
+  xinputrc="${VUB_XINPUTRC:-$REAL_HOME/.xinputrc}"
+  rime_custom="$rime_dir/default.custom.yaml"
+  rime_compiled="$rime_dir/build/default.yaml"
+  input_packages_complete="true"
+  for input_package in fcitx5 fcitx5-rime; do
+    if ! dpkg-query -W -f='${Status}\n' "$input_package" 2>/dev/null \
+        | grep -Fxq 'install ok installed'; then
+      input_packages_complete="false"
+    fi
+  done
+  if is_true "$input_packages_complete"; then
+    echo "packages:   installed"
+  else
+    echo "packages:   incomplete"
+  fi
+  if grep -Fxq 'run_im fcitx5' "$xinputrc" 2>/dev/null; then
+    echo "framework:  fcitx5"
+  else
+    echo "framework:  incomplete"
+  fi
+  echo "default IM: $(sed -nE 's/^DefaultIM=(.*)$/\1/p' "$fcitx_profile" 2>/dev/null | head -n1 || true)"
+  echo "active:     $(sed -nE 's/^ActiveByDefault=(.*)$/\1/p' "$fcitx_global_config" 2>/dev/null | head -n1 || true)"
+  if python3 "$SCRIPT_DIR/fcitx5_rime_config.py" validate \
+      --profile "$fcitx_profile" \
+      --global-config "$fcitx_global_config" \
+      --custom "$rime_custom" \
+      --compiled "$rime_compiled" >/dev/null 2>&1; then
+    echo "schema:     rime_ice only (9 candidates, -=previous, =next)"
+  else
+    echo "schema:     incomplete"
+  fi
+  if pgrep -u "$REAL_UID" -x fcitx5 >/dev/null 2>&1; then
+    echo "session:    running"
+  else
+    echo "session:    not running (log in to the graphical desktop)"
+  fi
+fi
+echo
+
 echo "=== VMware clipboard ==="
 for vmware_package in open-vm-tools open-vm-tools-desktop; do
   if dpkg-query -W -f='${Status}\n' "$vmware_package" 2>/dev/null \

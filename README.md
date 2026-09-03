@@ -1,6 +1,6 @@
 # VMware Ubuntu Bootstrap
 
-用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、软件源与更新、sudo 策略、固定网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
+用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、软件源与更新、Fcitx5/Rime/雾凇拼音、sudo 策略、固定网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
 
 建议先为新安装的虚拟机创建 VMware 快照，再运行本项目。
 
@@ -12,6 +12,7 @@
 - 关闭 GNOME 息屏、锁屏、自动挂起，以及系统休眠相关 target。
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
 - 安装 `open-vm-tools`、`open-vm-tools-desktop`，支持 Windows 与 Ubuntu 桌面之间复制粘贴。
+- 默认安装 Fcitx5、Rime、Lua/Octagram 插件与雾凇拼音，只启用雾凇方案并将中文设为登录后的默认输入法。
 - 校验发布者 OpenPGP 主指纹后配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker 官方/维护者 APT 源，更新索引并安装或升级工具链。
 - 默认安装 Node.js、npm、npx 与 node-gyp，配合现有编译工具支持 WebUI 本地开发和 npm 原生模块构建。
 - 默认使用不会主动移除软件包的 `apt-get upgrade --with-new-pkgs` 更新现有 APT 包，并安装 Docker CE、Compose 与 Buildx。
@@ -157,6 +158,7 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,all_proxy,ALL_
 | 升级现有 APT 包 | 开启 | 使用 `upgrade --with-new-pkgs`，不会为升级主动移除包 |
 | Node.js/npm 工具链 | 安装 | 安装 Node.js、npm、npx、node-gyp，并支持本地 WebUI 开发 |
 | Docker | 安装 | 默认安装 Docker CE、Compose、Buildx，配置 daemon、用户组和代理 |
+| Fcitx5/Rime/雾凇拼音 | 配置 | 默认中文；只启用雾凇全拼，9 个候选，`-`/`=` 上下翻页 |
 | 免密 sudo | 开启 | 为目标用户写入独立 `NOPASSWD` 规则；安全要求较高时改为 `N` |
 
 CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存到用户目录下权限为 `600` 的文件，不写入 TOML、日志或 Git。
@@ -167,6 +169,10 @@ CPA Provider 会直接写入当前用户的 `~/.codex/config.toml`，安装完�
 启用 Codex 时会按照 [OpenAI Linux sandbox 指南](https://developers.openai.com/codex/sandboxing) 安装 `bubblewrap`、`apparmor-profiles` 和 `apparmor-utils`，复制并加载 Ubuntu 24.04 的 `bwrap-userns-restrict` profile，再执行不调用 API 的本地 sandbox 验证。
 
 Docker Engine 默认从 Docker 官方源安装，包含 daemon、CLI、Compose、Buildx、用户组和代理配置；如检测到 Ubuntu `docker.io`，APT 会在同一事务中迁移到 Docker CE，不主动删除 `/var/lib/docker`。如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW、关闭 SSH 密码登录与免密 sudo 在各自配置分类中独立选择。
+
+Fcitx5/Rime 默认开启；不需要时可在交互中选择 `N`，或设置 `CONFIGURE_FCITX5_RIME=false`。安装器会启用 Ubuntu 24.04 Universe，安装 GTK3、GTK4、Qt5 前端及 Rime 的 Lua/Octagram 插件，再通过 [Plum](https://github.com/rime/plum) 的 GitHub HTTPS 仓库把 [雾凇拼音](https://github.com/iDvel/rime-ice) 安装到固定目录 `~/.local/share/fcitx5/rime`。`~/.config/fcitx5/profile` 只保留 `keyboard-us` 与 `rime`，并设置 `DefaultIM=rime`；全局配置同时设置 `ActiveByDefault=True`，因此重新登录后直接进入中文，`Ctrl+Space` 仍可切换英文。
+
+Rime 配置只启用 `rime_ice`，每页显示 9 个候选，`-` 上一页、`=` 下一页。配置不会加入 `__include: rime_ice_suggestion:/`，避免 Plum 当前布局下的 unresolved dependency。首次运行时，如果 Rime 目录非空且尚未安装雾凇，原目录会复制到 `~/.local/share/fcitx5/rime.bak.YYYYmmdd-HHMMSS` 后再清空；检测到已有 `rime_ice.schema.yaml` 时会保留用户词库并原地更新。GNOME Wayland 的 Kimpanel 提示不影响安装，只有候选窗定位异常时才需要另行处理。
 
 完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，配置带 `signed-by` 的独立软件源、更新索引、升级现有包，再安装或升级完整工具链。受管源包括 [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)、[Git Core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa)、[Git LFS](https://packagecloud.io/github/git-lfs)、[Kitware APT](https://apt.kitware.com/) 和启用 Docker 时的 [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)；不使用已弃用的 `apt-key` 或 `curl | bash`。其余 Ubuntu 系统库继续跟随 24.04 的安全维护版本，不盲目混用第三方仓库。
 
@@ -216,7 +222,7 @@ sudo bash install.sh --phase validate
 sudo bash install.sh --status
 ```
 
-SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启后固定地址、Docker 用户权限和其余检查全部通过，最终状态才会成为 `complete`。
+SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启同时完成 Fcitx5 所需的桌面重新登录。回来后默认应为中州韵，输入 `shi` 应显示 9 个候选，并可用 `-`/`=` 翻页。固定地址、Docker 用户权限和其余检查全部通过后，最终状态才会成为 `complete`。
 
 ## 9. 常用命令
 
@@ -237,6 +243,7 @@ sudo bash install.sh --phase proxy-off
 # 单独执行阶段
 sudo bash install.sh --phase dependencies
 sudo bash install.sh --phase packages
+sudo bash install.sh --phase input-method
 sudo bash install.sh --phase sudo-policy
 sudo bash install.sh --phase static-network
 sudo bash install.sh --phase power

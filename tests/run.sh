@@ -18,6 +18,7 @@ bash "$ROOT/tests/test_backup_rollback.sh"
 bash "$ROOT/tests/test_status_read_only.sh"
 bash "$ROOT/tests/test_preflight_dry_run.sh"
 bash "$ROOT/tests/test_packages_dry_run.sh"
+bash "$ROOT/tests/test_input_method_dry_run.sh"
 bash "$ROOT/tests/test_sudo_policy_dry_run.sh"
 bash "$ROOT/tests/test_static_network_ssh_staged.sh"
 bash "$ROOT/install.sh" --help >/dev/null

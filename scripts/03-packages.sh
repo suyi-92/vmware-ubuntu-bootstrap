@@ -17,7 +17,15 @@ load_proxy_state || warn "尚无持久化代理状态；APT 将使用当前环�
 require_command apt-get
 
 install_missing_apt_packages "安装 APT 软件源管理依赖" \
-  ca-certificates curl gnupg
+  ca-certificates curl gnupg software-properties-common
+
+if is_true "$CONFIGURE_FCITX5_RIME"; then
+  # Fcitx5、Rime 及其 Lua/Octagram 插件位于 Ubuntu 24.04 Universe。
+  backup_path /etc/apt/sources.list
+  backup_path /etc/apt/sources.list.d/ubuntu.sources
+  run_logged "启用 Ubuntu Universe 软件源" \
+    add-apt-repository --yes --no-update universe
+fi
 
 if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
   info "配置 GitHub CLI、Git/Git LFS、Kitware 与 Docker（如启用）软件源。"
@@ -58,6 +66,15 @@ MDD_BUILD_PACKAGES=(
 )
 PACKAGES+=("${MDD_BUILD_PACKAGES[@]}")
 
+FCITX5_RIME_PACKAGES=(
+  fcitx5 fcitx5-rime fcitx5-config-qt
+  fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
+  librime-plugin-lua librime-plugin-octagram librime-bin im-config
+)
+if is_true "$CONFIGURE_FCITX5_RIME"; then
+  PACKAGES+=("${FCITX5_RIME_PACKAGES[@]}")
+fi
+
 if is_true "$CONFIGURE_CODEX"; then
   PACKAGES+=(bubblewrap apparmor-profiles apparmor-utils)
 fi
@@ -90,6 +107,16 @@ else
   node --version >/dev/null 2>&1 || die "Node.js 安装失败。"
   npm --version >/dev/null 2>&1 || die "npm 安装失败。"
   npx --version >/dev/null 2>&1 || die "npx 安装失败。"
+  if is_true "$CONFIGURE_FCITX5_RIME"; then
+    for input_package in "${FCITX5_RIME_PACKAGES[@]}"; do
+      dpkg-query -W -f='${Status}\n' "$input_package" 2>/dev/null \
+        | grep -Fxq 'install ok installed' \
+        || die "Fcitx5/Rime 软件包安装失败：$input_package"
+    done
+    command -v fcitx5 >/dev/null 2>&1 || die "Fcitx5 安装失败。"
+    command -v im-config >/dev/null 2>&1 || die "im-config 安装失败。"
+    command -v rime_deployer >/dev/null 2>&1 || die "rime_deployer 安装失败。"
+  fi
 fi
 
 if is_dry_run; then

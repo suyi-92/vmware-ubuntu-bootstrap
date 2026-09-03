@@ -462,6 +462,7 @@ apply_config_defaults() {
   : "${ENABLE_UPSTREAM_APT_SOURCES:=true}"
   : "${UPGRADE_INSTALLED_PACKAGES:=true}"
   : "${INSTALL_DOCKER:=true}"
+  : "${CONFIGURE_FCITX5_RIME:=true}"
   : "${ENABLE_PASSWORDLESS_SUDO:=true}"
 }
 
@@ -539,6 +540,7 @@ validate_config() {
   validate_bool ENABLE_UPSTREAM_APT_SOURCES
   validate_bool UPGRADE_INSTALLED_PACKAGES
   validate_bool INSTALL_DOCKER
+  validate_bool CONFIGURE_FCITX5_RIME
   validate_bool ENABLE_PASSWORDLESS_SUDO
   [[ "$STATIC_IPV4_PREFIX" == "192.168.1" ]] || die "首版 STATIC_IPV4_PREFIX 必须为 192.168.1。"
   [[ "$STATIC_IPV4_LAST_OCTET" =~ ^[0-9]+$ ]] || die "静态 IP 末位必须是数字。"

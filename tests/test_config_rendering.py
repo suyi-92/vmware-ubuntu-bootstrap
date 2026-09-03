@@ -10,11 +10,73 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import fcitx5_rime_config  # noqa: E402
 import render_codex_config  # noqa: E402
 import secret_guard  # noqa: E402
 
 
 class ConfigRenderingTests(unittest.TestCase):
+    def test_fcitx5_rime_default_chinese_config(self) -> None:
+        existing = """[Hotkey]
+EnumerateWithTriggerKeys=True
+
+[Behavior]
+ActiveByDefault=False
+ShareInputState=No
+"""
+        rendered = fcitx5_rime_config.render_global_config(existing)
+        self.assertIn("EnumerateWithTriggerKeys=True", rendered)
+        self.assertIn("ShareInputState=No", rendered)
+        self.assertIn("ActiveByDefault=True", rendered)
+        self.assertNotIn("ActiveByDefault=False", rendered)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            profile = root / "profile"
+            global_config = root / "config"
+            custom = root / "default.custom.yaml"
+            compiled = root / "default.yaml"
+            profile.write_text(
+                (ROOT / "templates" / "fcitx5-profile.conf.tpl").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            global_config.write_text(rendered, encoding="utf-8")
+            custom.write_text(
+                (ROOT / "templates" / "rime-default.custom.yaml.tpl").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            compiled.write_text(
+                """key_binder:
+  bindings:
+    - {accept: minus, send: Page_Up, when: paging}
+    - {accept: equal, send: Page_Down, when: has_menu}
+menu:
+  page_size: 9
+schema_list:
+  - schema: rime_ice
+switcher:
+  caption: test
+""",
+                encoding="utf-8",
+            )
+            fcitx5_rime_config.validate_configuration(
+                profile, global_config, custom, compiled
+            )
+
+            custom.write_text(
+                custom.read_text(encoding="utf-8")
+                + "\n__include: rime_ice_suggestion:/\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "unsupported suggestion"):
+                fcitx5_rime_config.validate_configuration(
+                    profile, global_config, custom, compiled
+                )
+
     def test_codex_default_config_is_valid_toml(self) -> None:
         rendered = render_codex_config.render(
             "gpt-test/model", "https://cpa.example.com/v1", "/home/suyi/bin/token"
@@ -95,6 +157,7 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn('read_default "CPA 模型编号"', install_script)
         self.assertIn('CPA_BYPASS_PROXY="true"', install_script)
         self.assertIn("Docker Engine 默认安装", install_script)
+        self.assertIn("Fcitx5/Rime 默认安装雾凇拼音", install_script)
         self.assertIn('CONFIRM_SSH_KEY_LOGIN="$DISABLE_SSH_PASSWORD"', install_script)
         self.assertNotIn("Windows 公钥已在另一终端登录成功", install_script)
         self.assertIn(
@@ -112,6 +175,12 @@ class ConfigRenderingTests(unittest.TestCase):
         install_script = (ROOT / "install.sh").read_text(encoding="utf-8")
         bootstrap = (ROOT / "bootstrap.sh").read_text(encoding="utf-8")
         packages = (ROOT / "scripts" / "03-packages.sh").read_text(encoding="utf-8")
+        input_method = (ROOT / "scripts" / "04-input-method.sh").read_text(
+            encoding="utf-8"
+        )
+        input_method_helper = (
+            ROOT / "scripts" / "fcitx5_rime_config.py"
+        ).read_text(encoding="utf-8")
         repositories = (ROOT / "scripts" / "apt-repositories.sh").read_text(
             encoding="utf-8"
         )
@@ -124,13 +193,15 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("ensure_startup_dependencies", bootstrap)
         self.assertIn("scripts/00-dependencies.sh", bootstrap)
         self.assertIn(': "${INSTALL_DOCKER:=true}"', shell_library)
+        self.assertIn(': "${CONFIGURE_FCITX5_RIME:=true}"', shell_library)
         self.assertIn(': "${ENABLE_UPSTREAM_APT_SOURCES:=true}"', shell_library)
         self.assertIn(': "${UPGRADE_INSTALLED_PACKAGES:=true}"', shell_library)
         self.assertIn(': "${ENABLE_PASSWORDLESS_SUDO:=true}"', shell_library)
         self.assertIn(': "${TIMEZONE:=America/New_York}"', shell_library)
-        self.assertIn('VUB_CONFIG_VERSION="3"', example)
+        self.assertIn('VUB_CONFIG_VERSION="4"', example)
         self.assertIn('TIMEZONE="America/New_York"', example)
         self.assertIn('INSTALL_DOCKER="true"', example)
+        self.assertIn('CONFIGURE_FCITX5_RIME="true"', example)
         self.assertIn('ENABLE_PASSWORDLESS_SUDO="true"', example)
         self.assertIn(
             'if [[ "$VUB_CONFIG_VERSION" == "1" ]]',
@@ -149,6 +220,13 @@ class ConfigRenderingTests(unittest.TestCase):
             "bubblewrap",
             "apparmor-profiles",
             "apparmor-utils",
+            "fcitx5-rime",
+            "fcitx5-frontend-gtk4",
+            "fcitx5-frontend-qt5",
+            "librime-plugin-lua",
+            "librime-plugin-octagram",
+            "librime-bin",
+            "im-config",
         ):
             self.assertIn(package, packages)
         for package in (
@@ -178,6 +256,17 @@ class ConfigRenderingTests(unittest.TestCase):
         self.assertIn("NOPASSWD: ALL", shell_library)
         self.assertIn('visudo -cf "$sudoers_tmp"', sudo_policy)
         self.assertIn("sudo-policy", bootstrap)
+        self.assertIn("input-method", bootstrap)
+        self.assertIn(
+            "DefaultIM=rime",
+            (ROOT / "templates" / "fcitx5-profile.conf.tpl").read_text(
+                encoding="utf-8"
+            ),
+        )
+        self.assertIn("ActiveByDefault=True", input_method_helper)
+        self.assertIn('rime_dir="$RIME_DIR"', input_method)
+        self.assertIn("iDvel/rime-ice", input_method)
+        self.assertNotIn("rime_ice_suggestion", input_method)
         self.assertIn("all_proxy", proxy)
         self.assertIn("host.docker.internal", proxy)
         self.assertIn(

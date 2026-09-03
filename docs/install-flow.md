@@ -64,7 +64,7 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 安装器会询问是否为目标用户开启免密 sudo，默认 `Y`。首次启动仍需输入一次 Ubuntu 用户密码；只有 `sudo-policy` 阶段成功写入并通过 `visudo` 校验后，后续运行才不再询问密码。
 
-本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装包含 Node.js、npm、npx 与 node-gyp 的完整工具链。Docker 默认从官方源安装 Docker CE、Compose 和 Buildx。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
+本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装包含 Node.js、npm、npx 与 node-gyp 的完整工具链。Docker 默认从官方源安装 Docker CE、Compose 和 Buildx。输入法阶段默认通过 GitHub HTTPS 安装 Plum 与雾凇拼音，把 Rime 固定部署到 `~/.local/share/fcitx5/rime`，并把中州韵设为登录后直接激活的默认中文输入法。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
 
 安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 只显示 `*` 掩码，真实字符不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。首次安装保持“关闭 SSH 密码登录”为 `N`，确认 Windows 公钥可以从另一终端登录后再改为 `Y`。公网 CPA `/v1` 地址必须使用 HTTPS。输入 key 后会请求 `/v1/models`：单模型自动采用，多模型按编号选择，已有模型作为默认项。
 
@@ -88,6 +88,7 @@ sudo bash install.sh --phase dependencies
 sudo bash install.sh --phase preflight
 sudo bash install.sh --phase proxy
 sudo bash install.sh --phase packages
+sudo bash install.sh --phase input-method
 sudo bash install.sh --phase sudo-policy
 sudo bash install.sh --phase static-network
 sudo bash install.sh --phase power
@@ -123,4 +124,4 @@ sudo bash install.sh --phase validate
 sudo bash install.sh --status
 ```
 
-SSH 中写入固定网络但尚未重启时状态为 `configured-pending-reboot`；只有重启后固定地址生效且所有检查通过，状态才会成为 `complete`。Codex/CPA 安装完成后直接运行标准命令 `codex`。
+SSH 中写入固定网络但尚未重启时状态为 `configured-pending-reboot`；只有重启后固定地址生效且所有检查通过，状态才会成为 `complete`。重启后的图形会话会启动 Fcitx5，默认使用中州韵/雾凇拼音；不要在终端反复运行 `fcitx5 -rd`。Codex/CPA 安装完成后直接运行标准命令 `codex`。

@@ -111,6 +111,52 @@ node --version >/dev/null 2>&1 || die "Node.js 不可用。"
 npm --version >/dev/null 2>&1 || die "npm 不可用。"
 npx --version >/dev/null 2>&1 || die "npx 不可用。"
 
+if is_true "$CONFIGURE_FCITX5_RIME"; then
+  FCITX5_RIME_PACKAGES=(
+    fcitx5 fcitx5-rime fcitx5-config-qt
+    fcitx5-frontend-gtk3 fcitx5-frontend-gtk4 fcitx5-frontend-qt5
+    librime-plugin-lua librime-plugin-octagram librime-bin im-config
+  )
+  for input_package in "${FCITX5_RIME_PACKAGES[@]}"; do
+    dpkg-query -W -f='${Status}\n' "$input_package" 2>/dev/null \
+      | grep -Fxq 'install ok installed' \
+      || die "Fcitx5/Rime 软件包未安装：$input_package"
+  done
+  command -v fcitx5 >/dev/null 2>&1 || die "Fcitx5 不可用。"
+  command -v im-config >/dev/null 2>&1 || die "im-config 不可用。"
+  command -v rime_deployer >/dev/null 2>&1 || die "rime_deployer 不可用。"
+
+  RIME_DIR="${VUB_RIME_DIR:-$REAL_HOME/.local/share/fcitx5/rime}"
+  FCITX5_CONFIG_DIR="${VUB_FCITX5_CONFIG_DIR:-$REAL_HOME/.config/fcitx5}"
+  FCITX5_PROFILE="${VUB_FCITX5_PROFILE:-$FCITX5_CONFIG_DIR/profile}"
+  FCITX5_GLOBAL_CONFIG="${VUB_FCITX5_GLOBAL_CONFIG:-$FCITX5_CONFIG_DIR/config}"
+  XINPUTRC="${VUB_XINPUTRC:-$REAL_HOME/.xinputrc}"
+  RIME_CUSTOM="$RIME_DIR/default.custom.yaml"
+  RIME_SCHEMA="$RIME_DIR/rime_ice.schema.yaml"
+  RIME_COMPILED="$RIME_DIR/build/default.yaml"
+
+  [[ -d "$RIME_DIR" && ! -L "$RIME_DIR" ]] || die "Rime 用户目录不存在或不安全。"
+  [[ -f "$RIME_SCHEMA" && ! -L "$RIME_SCHEMA" ]] || die "雾凇拼音 schema 不存在或不安全。"
+  grep -Fxq 'run_im fcitx5' "$XINPUTRC" || die "默认输入法框架不是 Fcitx5。"
+  for user_file in "$XINPUTRC" "$FCITX5_PROFILE" "$FCITX5_GLOBAL_CONFIG" \
+    "$RIME_CUSTOM" "$RIME_COMPILED"; do
+    [[ -f "$user_file" && ! -L "$user_file" ]] || die "输入法配置文件不存在或不安全：$user_file"
+    [[ "$(stat -c %U "$user_file")" == "$REAL_USER" ]] \
+      || die "输入法配置文件不属于 $REAL_USER：$user_file"
+  done
+  python3 "$SCRIPT_DIR/fcitx5_rime_config.py" validate \
+    --profile "$FCITX5_PROFILE" \
+    --global-config "$FCITX5_GLOBAL_CONFIG" \
+    --custom "$RIME_CUSTOM" \
+    --compiled "$RIME_COMPILED" \
+    || die "Fcitx5/Rime 默认中文配置验收失败。"
+
+  if command -v pgrep >/dev/null 2>&1 \
+      && ! pgrep -u "$REAL_UID" -x fcitx5 >/dev/null 2>&1; then
+    warn "Fcitx5 尚未在图形会话中运行；请注销并重新登录后复验实际中文输入。"
+  fi
+fi
+
 if is_true "$INSTALL_DOCKER"; then
   command -v docker >/dev/null 2>&1 || die "Docker CLI 未安装。"
   systemctl is-enabled --quiet docker.socket || die "Docker socket 未设为开机启用。"

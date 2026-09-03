@@ -6,6 +6,7 @@
 - 当前阶段失败时，入口会尝试恢复该阶段受管文件。
 - 通过 SSH 安装时只写入并校验固定网络，重启前不会改变当前连接；直接在控制台应用时使用 `netplan try --timeout 120`，未确认则自动恢复网络。
 - 软件包安装本身不可通用回滚；`packages` 回滚会恢复受管 APT 源、密钥、hostname 和时间配置，但不会降级或卸载已经更新的软件包，也不会自动把 Docker CE 迁回 `docker.io`。
+- `input-method` 会快照 `.xinputrc`、Fcitx5 配置和完整 Rime 用户目录；首次接管非空目录时还会留下用户可直接读取的 `rime.bak.YYYYmmdd-HHMMSS` 副本。回滚不卸载 APT 包，也不回退作为下载缓存的 `~/plum` Git 工作树。
 - `sudo-policy` 回滚会恢复执行前的受管 sudoers 文件；关闭免密 sudo 也只移除本项目管理的规则。
 
 ## 查看备份
@@ -44,6 +45,16 @@ docker info
 ```
 
 这些命令不会删除 `/var/lib/docker` 中的镜像、容器或 volume。恢复后重新执行 `sudo bash install.sh --phase packages`，脚本只有在 `docker.socket`、`docker.service` 和 `docker info` 全部验收通过后才会把阶段标记为完成。
+
+## 输入法恢复
+
+输入法阶段失败时入口会自动恢复执行前的 Rime、Fcitx5 和 `.xinputrc` 文件。手动回滚成功后请注销并重新登录；不要用 `fcitx5 -rd` 循环重启后台进程。如果只需要重新安装或编译雾凇拼音，可执行：
+
+```bash
+sudo bash install.sh --phase input-method
+```
+
+首次接管时生成的 `~/.local/share/fcitx5/rime.bak.*` 不应在确认输入法、用户词库和自定义短语都正常前删除。
 
 ## 网络救援
 
