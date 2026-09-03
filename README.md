@@ -278,6 +278,7 @@ pgrep -a -u "$USER" -x vmtoolsd | grep -- '-n vmusr'
 ## 12. 文档与测试
 
 - [安装流程](docs/install-flow.md)
+- [宿主机 IP 变更处理](docs/host-ip-change.md)
 - [验证清单](docs/verification.md)
 - [恢复说明](docs/recovery.md)
 
