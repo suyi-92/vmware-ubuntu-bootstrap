@@ -6,156 +6,107 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$SCRIPT_DIR/00-lib.sh"
 
 start_phase "static-network"
+# A config/previous phase backup inherited from the entrypoint is not this transaction.
+VUB_BACKUP_DIR=""
+export VUB_BACKUP_DIR
 require_root
-load_config true
+load_config false
+validate_bool CONFIGURE_STATIC_NETWORK
 resolve_real_user
 
 if ! is_true "$CONFIGURE_STATIC_NETWORK"; then
-  mark_phase skipped "disabled by config"
-  info "按配置跳过固定网络。"
+  show_network_state
+  # Preserve earlier pending/complete state and the configuration on disk.
+  [[ -f "$VUB_STATE_DIR/static-network.state" ]] || mark_phase skipped "keeping existing network"
   exit 0
 fi
 
-SSH_ACTIVATION_ON_REBOOT="false"
-[[ -n "${SSH_CONNECTION:-}" ]] && SSH_ACTIVATION_ON_REBOOT="true"
-
-require_command ip
-require_command python3
+validate_static_network
+NETWORK_INTERFACE=$(current_interface) || die "请选择明确的管理网卡。"
+CURRENT_CIDR=$(current_ipv4_cidr "$NETWORK_INTERFACE")
+MANAGEMENT_MAC=$(current_mac "$NETWORK_INTERFACE")
+check_static_conflicts
 require_command netplan
-
-[[ -n "$NETWORK_INTERFACE" ]] || NETWORK_INTERFACE="$(current_interface)"
-ip link show dev "$NETWORK_INTERFACE" >/dev/null 2>&1 || die "网卡不存在：$NETWORK_INTERFACE"
-
-TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
-NORMALIZED="$(python3 - "$TARGET_IPV4" "$PREFIX_LENGTH" "$GATEWAY_IPV4" "$DNS_SERVERS" <<'PY'
-import ipaddress
-import re
-import sys
-
-address, prefix, gateway, raw_dns = sys.argv[1:]
-interface = ipaddress.ip_interface(f"{address}/{prefix}")
-gw = ipaddress.ip_address(gateway)
-if interface.version != 4 or gw.version != 4:
-    raise SystemExit("只支持 IPv4")
-if address == str(interface.network.network_address) or address == str(interface.network.broadcast_address):
-    raise SystemExit("不能使用网络地址或广播地址")
-if gw not in interface.network or gw == interface.ip:
-    raise SystemExit("网关必须与目标地址同网段且不能相同")
-dns_values = [x for x in re.split(r"[\s,]+", raw_dns.strip()) if x]
-if not dns_values:
-    raise SystemExit("至少配置一个 DNS")
-for value in dns_values:
-    ipaddress.ip_address(value)
-print(str(interface.ip))
-print(str(gw))
-print(" ".join(dns_values))
-PY
-)" || die "固定网络参数校验失败。"
-
-mapfile -t NORMALIZED_LINES <<<"$NORMALIZED"
-TARGET_IPV4="${NORMALIZED_LINES[0]}"
-GATEWAY_IPV4="${NORMALIZED_LINES[1]}"
-DNS_SERVERS="${NORMALIZED_LINES[2]}"
-
-if [[ -r "$VUB_ETC_DIR/proxy.env" ]]; then
-  # shellcheck disable=SC1090
-  source "$VUB_ETC_DIR/proxy.env"
-  [[ "${VUB_PROXY_HOST:-}" != "$TARGET_IPV4" ]] || die "固定 IP 不能与代理主机相同。"
-fi
-
-CURRENT_IPV4="$(current_ipv4 "$NETWORK_INTERFACE")"
-if [[ "$CURRENT_IPV4" != "$TARGET_IPV4" ]]; then
-  require_command arping
-  set +e
-  arping -D -I "$NETWORK_INTERFACE" -c 2 -w 3 "$TARGET_IPV4" >"/tmp/vub-arping.$$.log" 2>&1
-  ARPING_CODE="$?"
-  set -e
-  if (( ARPING_CODE != 0 )); then
-    tail -n 20 "/tmp/vub-arping.$$.log" >&2 || true
-    rm -f "/tmp/vub-arping.$$.log"
-    die "检测到 $TARGET_IPV4 可能已被占用。"
-  fi
-  rm -f "/tmp/vub-arping.$$.log"
-fi
 
 NETPLAN_DIR="${VUB_NETPLAN_DIR:-/etc/netplan}"
 NETPLAN_FILE="${VUB_NETPLAN_FILE:-$NETPLAN_DIR/90-vmware-ubuntu-bootstrap-static.yaml}"
-DNS_YAML="$(python3 - "$DNS_SERVERS" <<'PY'
-import sys
-print(", ".join(sys.argv[1].split()))
-PY
-)"
-
-netplan_files=()
-shopt -s nullglob
-netplan_files=("$NETPLAN_DIR"/*.yaml "$NETPLAN_DIR"/*.yml)
-shopt -u nullglob
-normalized_netplan_files=0
-for netplan_path in "${netplan_files[@]}"; do
-  [[ ! -L "$netplan_path" ]] || die "拒绝修改 Netplan 符号链接：$netplan_path"
-  [[ -f "$netplan_path" ]] || continue
-  if [[ "$(stat -c '%U:%G:%a' "$netplan_path")" != "root:root:600" ]]; then
-    backup_path "$netplan_path"
-    run chown root:root "$netplan_path"
-    run chmod 0600 "$netplan_path"
-    normalized_netplan_files=$((normalized_netplan_files + 1))
+# Runtime/vendor definitions cannot safely be rewritten persistently here.
+for extra_dir in "${VUB_NETPLAN_RUN_DIR:-/run/netplan}" "${VUB_NETPLAN_LIB_DIR:-/lib/netplan}"; do
+  if compgen -G "$extra_dir/*.yaml" >/dev/null || compgen -G "$extra_dir/*.yml" >/dev/null; then
+    die "发现 $extra_dir 中的 Netplan 定义；请管理员整合到 /etc/netplan 后再配置静态网络。"
   fi
 done
-if (( normalized_netplan_files > 0 )); then
-  info "已将 $normalized_netplan_files 个现有 Netplan YAML 文件规范为 root:root:600。"
-fi
 
-{
-  cat <<EOF
-network:
-  version: 2
-  ethernets:
-    ${NETWORK_INTERFACE}:
-      dhcp4: false
-      addresses: [${TARGET_IPV4}/${PREFIX_LENGTH}]
-      routes:
-        - to: default
-          via: ${GATEWAY_IPV4}
-      nameservers:
-        addresses: [${DNS_YAML}]
-EOF
-} | write_managed_file "$NETPLAN_FILE" 0600 root root
-
-run netplan generate
+PLAN_DIR=$(mktemp -d)
+NETWORK_COMMITTED=false
+network_cleanup() {
+  local code=$? failed_backup="$VUB_BACKUP_DIR"
+  trap - EXIT HUP INT TERM
+  if ((code != 0)) && ! is_dry_run && ! is_true "$NETWORK_COMMITTED" && [[ -n "$VUB_BACKUP_DIR" ]]; then
+    warn "恢复静态网络阶段修改前的文件。"
+    VUB_BACKUP_DIR="" bash "$SCRIPT_DIR/10-rollback.sh" --backup "$failed_backup" --automatic \
+      || warn "恢复失败；请在 VMware 控制台按 docs/recovery.md 恢复备份。"
+  fi
+  rm -rf -- "$PLAN_DIR"
+  exit "$code"
+}
+trap network_cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+python3 "$SCRIPT_DIR/network_config.py" plan "$NETPLAN_DIR" "$NETPLAN_FILE" \
+  "$NETWORK_INTERFACE" "$MANAGEMENT_MAC" "$STATIC_IPV4_CIDR" "$GATEWAY_IPV4" "$DNS_SERVERS" "$PLAN_DIR" \
+  >"$PLAN_DIR/changes" || die "无法生成仅针对管理接口的 Netplan 配置。"
 
 if is_dry_run; then
-  if is_true "$SSH_ACTIVATION_ON_REBOOT"; then
-    info "DRY-RUN: 通过 SSH 写入固定网络，重启后切换到 ${TARGET_IPV4}/${PREFIX_LENGTH}"
-  else
-    info "DRY-RUN: netplan try --timeout 120"
-  fi
+  info "DRY-RUN: 计划为 $NETWORK_INTERFACE 配置 $STATIC_IPV4_CIDR；不写配置、不执行 netplan 或 ARP。"
   exit 0
 fi
 
-if is_true "$SSH_ACTIVATION_ON_REBOOT"; then
-  complete_backup
+if [[ ! -s "$PLAN_DIR/changes" ]] && ! static_network_is_live \
+    && grep -q '^status=pending-reboot$' "$VUB_STATE_DIR/static-network.state" 2>/dev/null; then
+  info "相同配置仍待重启；保留原备份和 pending-reboot 状态。"
+  show_network_state
+  NETWORK_COMMITTED=true
+  exit 0
+fi
+
+if [[ ! -s "$PLAN_DIR/changes" ]] && static_network_is_live; then
+  validate_managed_netplan_file
+  info "相同静态配置已在所选网卡上生效；没有新增网络配置。"
+  mark_phase complete "ip=$STATIC_IPV4_CIDR;gateway=$GATEWAY_IPV4"
+  NETWORK_COMMITTED=true
+  exit 0
+fi
+
+backup_path "$VUB_STATE_DIR/static-network.state"
+backup_path "$VUB_STATE_DIR/reboot-required"
+while IFS=$'\t' read -r path staged; do
+  [[ -n "$path" ]] || continue
+  write_managed_file "$path" 0600 root root <"$staged"
+done <"$PLAN_DIR/changes"
+netplan generate || die "Netplan 语法校验失败。"
+
+if [[ -n "${SSH_CONNECTION:-}" ]]; then
   record_reboot_required
-  mark_phase pending-reboot "ip=${TARGET_IPV4}/${PREFIX_LENGTH};gateway=$GATEWAY_IPV4;activation=reboot"
-  info "固定网络配置已写入；当前 SSH 继续使用 ${CURRENT_IPV4}，重启后切换到 ${TARGET_IPV4}/${PREFIX_LENGTH}。"
-  info "重启后请从 Windows 连接：ssh -p $SSH_PORT $REAL_USER@$TARGET_IPV4"
+  mark_phase pending-reboot "ip=$STATIC_IPV4_CIDR;gateway=$GATEWAY_IPV4;activation=reboot"
+  complete_backup
+  NETWORK_COMMITTED=true
+  info "静态配置仅写入磁盘；当前地址 $CURRENT_CIDR；待生效地址 $STATIC_IPV4_CIDR。"
+  info "重启后连接：ssh -p $SSH_PORT $REAL_USER@${STATIC_IPV4_CIDR%/*}"
+  warn "重启后生效没有自动回滚保证。重启前可撤销：sudo bash install.sh --rollback $(basename "$VUB_BACKUP_DIR")"
   exit 0
 fi
 
 [[ -r /dev/tty ]] || die "netplan try 需要交互式控制台。"
-warn "即将切换到 ${TARGET_IPV4}/${PREFIX_LENGTH}。netplan 会在 120 秒未确认时自动回滚。"
-netplan try --timeout 120 </dev/tty >/dev/tty 2>&1 \
-  || die "netplan try 未确认或应用失败，网络应已自动回滚。"
-
-ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
-  || die "固定 IP 应用后复验失败。"
-ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关复验失败。"
-getent hosts github.com >/dev/null 2>&1 || die "固定网络后的 DNS 复验失败。"
+warn "即将切换到 $STATIC_IPV4_CIDR；请在 120 秒内确认 netplan try。"
+netplan try --timeout 120 </dev/tty >/dev/tty 2>&1 || die "netplan try 未确认或应用失败。"
+static_network_is_live || die "静态地址或所选接口的默认网关复验失败。"
+getent hosts github.com >/dev/null 2>&1 || die "DNS 复验失败。"
 if load_proxy_state; then
-  curl -fsSI --connect-timeout 5 --max-time 15 https://github.com/ >/dev/null \
-    || die "固定网络后的代理 HTTPS 复验失败。"
+  curl -fsSI --connect-timeout 5 --max-time 15 https://github.com/ >/dev/null || die "代理 HTTPS 复验失败。"
 fi
-
+mark_phase complete "ip=$STATIC_IPV4_CIDR;gateway=$GATEWAY_IPV4"
 complete_backup
-record_reboot_required
-mark_phase complete "ip=${TARGET_IPV4}/${PREFIX_LENGTH};gateway=$GATEWAY_IPV4"
-info "固定网络阶段完成。"
+NETWORK_COMMITTED=true
+info "静态网络已应用并通过地址、网关和连通性检查。"

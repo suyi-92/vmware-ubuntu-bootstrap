@@ -48,7 +48,7 @@ choose_verified_proxy() {
   iface="${NETWORK_INTERFACE:-$(current_interface)}"
   self_ip="$(current_ipv4 "$iface")"
   [[ -n "$self_ip" ]] || die "无法确定 Ubuntu IPv4。"
-  cidr="${PROXY_SCAN_CIDR:-$(cidr24_for_ip "$self_ip")}"
+  cidr="${PROXY_SCAN_CIDR:-$(default_proxy_scan_cidr "$iface")}"
 
   configured_host="${VUB_FORCE_PROXY_HOST:-${PROXY_HOST:-}}"
   if [[ -n "$configured_host" ]]; then
@@ -270,9 +270,10 @@ apply_proxy() {
   require_command visudo
   [[ -n "${NETWORK_INTERFACE:-}" ]] || NETWORK_INTERFACE="$(current_interface)"
   local host proxy_url lan_cidr no_proxy_value cpa_host sudoers_tmp systemd_tmp apt_tmp
+  local docker_proxy_changed=false docker_proxy_content
   host="$(choose_verified_proxy)"
   proxy_url="http://${host}:${PROXY_PORT}"
-  lan_cidr="${PROXY_SCAN_CIDR:-$(cidr24_for_ip "$(current_ipv4 "$NETWORK_INTERFACE")")}"
+  lan_cidr="$(management_cidrs | paste -sd, -)"
   cpa_host="$(cpa_host_for_no_proxy)"
   no_proxy_value="localhost,127.0.0.1,::1,.local,host.docker.internal,gateway.docker.internal,${lan_cidr},${host}"
   [[ -n "$GATEWAY_IPV4" ]] && no_proxy_value+=",${GATEWAY_IPV4}"
@@ -323,12 +324,11 @@ apply_proxy() {
   ensure_git_include "$GIT_PROXY_FILE"
 
   if command -v docker >/dev/null 2>&1 || systemctl list-unit-files --type=service 2>/dev/null | grep -q '^docker\.service'; then
-    {
-      printf '[Service]\n'
-      printf 'Environment="HTTP_PROXY=%s"\n' "$proxy_url"
-      printf 'Environment="HTTPS_PROXY=%s"\n' "$proxy_url"
-      printf 'Environment="NO_PROXY=%s"\n' "$no_proxy_value"
-    } | write_managed_file "$DOCKER_DAEMON_FILE" 0644 root root
+    docker_proxy_content=$(printf '[Service]\nEnvironment="HTTP_PROXY=%s"\nEnvironment="HTTPS_PROXY=%s"\nEnvironment="NO_PROXY=%s"\n' "$proxy_url" "$proxy_url" "$no_proxy_value")
+    if [[ ! -f "$DOCKER_DAEMON_FILE" ]] || [[ "$(cat "$DOCKER_DAEMON_FILE")" != "$docker_proxy_content" ]]; then
+      printf '%s\n' "$docker_proxy_content" | write_managed_file "$DOCKER_DAEMON_FILE" 0644 root root
+      docker_proxy_changed=true
+    fi
     merge_docker_proxy /root/.docker/config.json "$proxy_url" "$no_proxy_value" root root
     merge_docker_proxy "$REAL_HOME/.docker/config.json" "$proxy_url" "$no_proxy_value" "$REAL_USER" "$REAL_GROUP"
   fi
@@ -348,7 +348,7 @@ apply_proxy() {
   if ! is_dry_run; then
     systemctl daemon-reexec
     systemctl daemon-reload
-    if systemctl is-active --quiet docker 2>/dev/null; then
+    if is_true "$docker_proxy_changed" && systemctl is-active --quiet docker 2>/dev/null; then
       systemctl restart docker
     fi
   fi

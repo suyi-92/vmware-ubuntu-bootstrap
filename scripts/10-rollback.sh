@@ -148,7 +148,11 @@ if ! is_dry_run; then
   case "$SOURCE_PHASE" in
     static-network)
       netplan generate
-      netplan apply
+      if [[ -n "${SSH_CONNECTION:-}" ]]; then
+        warn "网络文件已恢复；SSH 会话不立即应用。请核对磁盘配置后在控制台应用或重启。"
+      else
+        netplan apply
+      fi
       ;;
     ssh)
       sshd_bin="${VUB_SSHD_BIN:-/usr/sbin/sshd}"

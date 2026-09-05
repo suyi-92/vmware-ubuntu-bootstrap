@@ -39,16 +39,9 @@ echo "=== Network ==="
 iface="${NETWORK_INTERFACE:-$(current_interface)}"
 echo "interface: ${iface:-unknown}"
 echo "IPv4:     $(current_ipv4 "$iface" 2>/dev/null || echo unknown)"
-echo "gateway:  $(current_gateway 2>/dev/null || echo unknown)"
-if [[ -r "$VUB_CONFIG_FILE" ]] && is_true "$CONFIGURE_STATIC_NETWORK"; then
-  static_status="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
-  echo "target:   ${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}/${PREFIX_LENGTH}"
-  if [[ "$static_status" == "pending-reboot" ]]; then
-    echo "switch:   after reboot"
-  else
-    echo "switch:   ${static_status:-not configured}"
-  fi
-fi
+echo "gateway:  $(current_gateway "$iface" 2>/dev/null || echo unknown)"
+show_network_state || true
+
 echo
 
 echo "=== Proxy ==="

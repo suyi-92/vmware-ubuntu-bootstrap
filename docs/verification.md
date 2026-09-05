@@ -26,12 +26,11 @@ snap get system proxy.http 2>/dev/null || true
 
 Docker 默认安装。daemon 的代理用于拉取镜像；root/普通用户的 Docker client 配置会把代理传给 `docker build` 和新建容器，因此容器内的 npm、pip、curl 等常见下载工具也能沿用代理。
 
-Docker CE 的 service 使用 systemd socket activation，因此需要同时验证 socket、service 和 daemon API：
+验证本机 daemon API；只有服务使用 `-H fd://` 时才附加检查 docker.socket：
 
 ```bash
-systemctl is-enabled docker.socket docker.service
-systemctl is-active docker.socket docker.service
-docker info
+systemctl is-active docker.service
+sudo env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock info
 ```
 
 ## APT 软件源与版本
@@ -81,13 +80,13 @@ sudo -n true
 ## 固定网络
 
 ```bash
-ip -4 address show dev ens33
+ip -4 address show dev <管理网卡>
 ip -4 route
-resolvectl status ens33
+resolvectl status <管理网卡>
 sudo stat -c '%U:%G:%a %n' /etc/netplan/*.yaml
 ```
 
-确认重启后仍为预期地址，且没有和网关、Windows 主机或 DHCP 设备冲突；Netplan YAML 应为 `root:root:600`。
+确认重启后仍为预期地址，且没有和网关、Windows 主机或 DHCP 设备冲突；本阶段修改的 Netplan YAML 应为 `root:root:600`；其他接口和 IPv6 配置应保持原样。
 
 ## 电源策略
 
@@ -120,10 +119,10 @@ ss -ltn6 | grep ':22 '
 从 Windows 新开 PowerShell：
 
 ```powershell
-ssh -p 22 suyi@192.168.1.254
+ssh -p 22 suyi@<实际管理IPv4>
 ```
 
-端口、用户和地址以实际配置为准。SSH 一键安装结束但尚未重启时，原会话仍使用 DHCP 地址；执行 `sudo reboot` 后改用安装器显示的固定地址。
+端口、用户和地址以实际配置为准。保持模式使用当前真实地址；只有显式静态配置才存在待重启地址。旧 pending 状态仍需明确处理。
 
 ## Codex / CPA
 
@@ -136,3 +135,7 @@ codex doctor --summary
 ```
 
 `model_provider` 应为 `cpa`，sandbox 命令应输出 `sandbox-ok`，Doctor 应为 `0 warn · 0 fail`，随后直接运行 `codex`。API key 文件必须为当前用户所有且权限为 `600`。不要把 key 或 Authorization header 粘贴到诊断日志。
+
+## 本次兼容修复的验证范围
+
+命令 mock 与临时 Netplan 测试不代表真实 VMware 安装验收。两台 VM 同 LAN/异网段、CE 与 docker.io 两种安装顺序、重启与真实 ARP/代理/SSH 连通性仍需按 [兼容说明](compatibility.md) 人工验证。

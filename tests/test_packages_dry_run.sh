@@ -53,7 +53,15 @@ export VUB_LOG_DIR="$FIXTURE_ROOT/log"
 export VUB_BACKUP_ROOT="$FIXTURE_ROOT/backups"
 export VUB_DRY_RUN=true
 
-OUTPUT="$(bash "$ROOT/scripts/03-packages.sh" 2>&1)"
+# Exercise the complete production phase after its imports, replacing host
+# Docker discovery so this dry-run never queries the developer's daemon.
+OUTPUT="$(bash -c '
+  SCRIPT_DIR="$1/scripts"
+  source "$SCRIPT_DIR/00-lib.sh"
+  source "$SCRIPT_DIR/apt-repositories.sh"
+  docker_detect() { printf "healthy-ce\n"; }
+  source <(sed -n '\''/^start_phase "packages"/,$p'\'' "$SCRIPT_DIR/03-packages.sh")
+' bash "$ROOT" 2>&1)" || { printf '%s\n' "$OUTPUT"; exit 1; }
 grep -Fq '安装或升级常用、运行与构建软件包' <<<"$OUTPUT"
 grep -Fq 'nodejs npm node-gyp' <<<"$OUTPUT"
 grep -Fq 'add-apt-repository --yes --no-update universe' <<<"$OUTPUT"
@@ -61,10 +69,8 @@ grep -Fq 'fcitx5 fcitx5-rime fcitx5-config-qt' <<<"$OUTPUT"
 grep -Fq 'librime-plugin-lua librime-plugin-octagram librime-bin im-config' <<<"$OUTPUT"
 grep -Fq 'verify gh, Git LFS, CMake, Node.js, npm and npx' <<<"$OUTPUT"
 grep -Fq 'GitHub CLI' <<<"$OUTPUT"
-grep -Fq 'systemctl daemon-reload' <<<"$OUTPUT"
-grep -Fq 'systemctl start docker.socket' <<<"$OUTPUT"
-grep -Fq 'systemctl restart docker.service' <<<"$OUTPUT"
-grep -Fq 'verify docker.socket, docker.service and docker info' <<<"$OUTPUT"
+grep -Fq 'reuse healthy Docker or start an existing stopped docker.service' <<<"$OUTPUT"
+grep -Fq 'verify local rootful Docker' <<<"$OUTPUT"
 grep -Fq 'DRY-RUN' <<<"$OUTPUT"
 
 for path in "$VUB_ETC_DIR" "$VUB_STATE_DIR" "$VUB_LOG_DIR" "$VUB_BACKUP_ROOT"; do

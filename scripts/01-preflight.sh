@@ -10,6 +10,7 @@ require_root
 load_config true
 resolve_real_user
 validate_config
+if is_true "$INSTALL_DOCKER"; then select_docker_source || die "请先诊断已有 Docker。"; fi
 
 OS_RELEASE_FILE="${VUB_OS_RELEASE_FILE:-/etc/os-release}"
 [[ -r "$OS_RELEASE_FILE" ]] || die "无法读取 $OS_RELEASE_FILE"
@@ -27,7 +28,7 @@ done
 ip link show dev "$NETWORK_INTERFACE" >/dev/null 2>&1 || die "网卡不存在：$NETWORK_INTERFACE"
 
 CURRENT_IP="$(current_ipv4 "$NETWORK_INTERFACE")"
-CURRENT_GATEWAY="$(current_gateway)"
+CURRENT_GATEWAY="$(current_gateway "$NETWORK_INTERFACE")"
 [[ -n "$CURRENT_IP" ]] || die "网卡 $NETWORK_INTERFACE 没有全局 IPv4。"
 [[ -n "$CURRENT_GATEWAY" ]] || die "没有 IPv4 默认路由。"
 
@@ -41,7 +42,7 @@ fi
 
 info "系统：${PRETTY_NAME}"
 info "目标用户：$REAL_USER ($REAL_HOME)"
-info "网络：$NETWORK_INTERFACE / $CURRENT_IP / gateway $CURRENT_GATEWAY"
+show_network_state
 info "根文件系统剩余：$((AVAILABLE_KB / 1024)) MiB"
 
 mark_phase complete "os=${ID}:${VERSION_ID};iface=$NETWORK_INTERFACE;ip=$CURRENT_IP"

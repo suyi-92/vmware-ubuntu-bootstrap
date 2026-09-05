@@ -1,6 +1,6 @@
 # VMware Ubuntu Bootstrap
 
-用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、软件源与更新、Fcitx5/Rime/雾凇拼音、sudo 策略、固定网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
+用于初始化本地 VMware Workstation 中的 Ubuntu 24.04 Desktop。完成一次交互配置后，脚本会按阶段配置代理、软件源与更新、Fcitx5/Rime/雾凇拼音、sudo 策略、可选静态网络、电源策略、SSH、VMware 桌面集成以及 Codex/CPA，并提供状态检查和回滚入口。
 
 建议先为新安装的虚拟机创建 VMware 快照，再运行本项目。
 
@@ -8,14 +8,14 @@
 
 - 自动扫描当前局域网内可用的 `7890` HTTP/Mixed 代理。
 - 为普通用户、root、sudo、APT、Git、Docker、Snap，以及遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 的命令和 systemd 服务配置代理。
-- 配置桥接网卡固定 IPv4，应用前检查地址冲突，并通过 `netplan try` 提供超时回滚。
+- 默认保持现有网络，显示管理网卡、IPv4/CIDR、网关和 MAC；静态 IPv4 需明确启用，应用前使用 ARP 检测冲突。
 - 关闭 GNOME 息屏、锁屏、自动挂起，以及系统休眠相关 target。
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
 - 安装 `open-vm-tools`、`open-vm-tools-desktop`，支持 Windows 与 Ubuntu 桌面之间复制粘贴。
 - 默认安装 Fcitx5、Rime、Lua/Octagram 插件与雾凇拼音，只启用雾凇方案并将中文设为登录后的默认输入法。
 - 校验发布者 OpenPGP 主指纹后配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker 官方/维护者 APT 源，更新索引并安装或升级工具链。
 - 默认安装 Node.js、npm、npx 与 node-gyp，配合现有编译工具支持 WebUI 本地开发和 npm 原生模块构建。
-- 默认使用不会主动移除软件包的 `apt-get upgrade --with-new-pkgs` 更新现有 APT 包，并安装 Docker CE、Compose 与 Buildx。
+- 默认使用禁止移除包的 APT 升级；全新系统按上游源开关选择 CE 或 docker.io，已有 Docker 保留来源，并验收相应的 Compose/Buildx。
 - 可配置目标用户免密 sudo，默认开启；规则单独写入并通过 `visudo` 校验，可随时关闭或回滚。
 - 安装 Codex CLI，并可配置指向 CPA `/v1` Responses API 的自定义 Provider；在 Ubuntu 24.04 上自动准备 bubblewrap/AppArmor sandbox。
 - 保存分阶段状态、受保护日志和配置备份，支持检查与回滚。
@@ -30,7 +30,7 @@
 - 当前局域网不大于 `/24`
 - Windows 代理软件提供可从局域网访问的 `7890` HTTP/Mixed 端口
 
-当前固定网络配置面向 `192.168.1.0/24`：默认地址为 `192.168.1.254/24`，末位可在 `2–254` 范围内修改。`192.168.1.255` 是 `/24` 的广播地址，不能分配给虚拟机。
+新配置默认 `CONFIGURE_STATIC_NETWORK=false`，不会切换 DHCP、固化当前租约或写入固定地址。推荐在路由器按各 VM 独立 MAC 做 DHCP 地址保留；脚本只显示信息，不配置路由器。需要静态地址时使用完整 `STATIC_IPV4_CIDR`（普通 IPv4 LAN 支持 `/1`–`/30`），详见 [Docker 与网络兼容说明](docs/compatibility.md)。同一局域网的两台 VM 不能共用一个地址，文档示例不代表地址分配。
 
 ## 3. VMware 与 Windows 准备
 
@@ -122,13 +122,9 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 即使选择开启免密 sudo，首次运行仍需要输入一次 Ubuntu 用户密码完成初始提权；`sudo-policy` 阶段通过后，后续命令才可免密执行。
 
-通过 SSH 运行时，脚本会规范现有 Netplan YAML 权限、校验目标地址并写入固定网络，但不会立即切断当前 DHCP SSH 连接；固定地址会在重启时生效，不需要再回 VMware 控制台执行网络阶段。完整安装结束后运行：
+默认保持模式沿用当前网络，SSH 提示使用实际地址。只有显式启用静态网络时，SSH 安装才备份、写入并校验 Netplan，然后记录 `pending-reboot`；当前连接继续保留，重启后尝试使用待生效地址。**重启路径没有自动回滚保证**，应先记录备份 ID 和 VMware 控制台恢复方法。控制台立即应用仍使用 `netplan try --timeout 120`，失败时恢复磁盘配置。
 
-```bash
-sudo reboot
-```
-
-SSH 会正常断开。虚拟机启动后，使用安装器最后显示的新固定地址重新连接。直接在 VMware 控制台执行网络阶段时，仍使用 `netplan try --timeout 120` 立即切换并提供自动回滚保护。
+其他阶段可能独立要求重启或重新登录，请根据最终提示操作。保持模式遇到旧静态文件或待重启状态时会如实显示，不会擅自删除配置或声称恢复 DHCP。
 
 ### 克隆后再运行
 
@@ -146,18 +142,18 @@ sudo --preserve-env=http_proxy,https_proxy,HTTP_PROXY,HTTPS_PROXY,all_proxy,ALL_
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| 代理主机 | 自动发现 | 扫描当前 `/24` 中真正可用的 `7890` 代理 |
-| 固定 IPv4 | `192.168.1.254/24` | 应确保不在 DHCP 动态分配范围且未被占用 |
+| 代理主机 | 自动发现 | 默认扫描当前地址所在的至多 256 地址范围，独立于静态网络前缀 |
+| 静态 IPv4 | 关闭，无地址默认值 | 明确启用并输入完整 CIDR；由管理员排除 DHCP 动态池或保留地址 |
 | DNS 服务器 | 自动读取当前连接 | 将 `github.com` 等域名解析为 IP；多个地址使用空格分隔 |
 | SSH 端口 | `22` | 支持自定义端口 |
 | Windows SSH 公钥 | 必填 | 写入目标用户的 `authorized_keys` |
 | UFW | 不开启 | 已经处于 active 状态时仍会添加 SSH 放行规则 |
 | 关闭 SSH 密码登录 | `N` | 首次安装保持 `N`；确认 Windows 公钥登录成功后才改为 `Y` |
 | Codex/CPA | 配置 | 可在交互中选择跳过 |
-| 上游 APT 源 | 开启 | 新版 Git、gh、Git LFS、CMake；Docker 启用时增加 Docker 官方源 |
+| 上游 APT 源 | 开启 | 新版 Git、gh、Git LFS、CMake；首次选择 CE 时增加 Docker 官方源，保留已有 Docker 源 |
 | 升级现有 APT 包 | 开启 | 使用 `upgrade --with-new-pkgs`，不会为升级主动移除包 |
 | Node.js/npm 工具链 | 安装 | 安装 Node.js、npm、npx、node-gyp，并支持本地 WebUI 开发 |
-| Docker | 安装 | 默认安装 Docker CE、Compose、Buildx，配置 daemon、用户组和代理 |
+| Docker | 安装 | 全新系统按源开关选择，已有安装保留来源；配置用户组和代理 |
 | Fcitx5/Rime/雾凇拼音 | 配置 | 默认中文；只启用雾凇全拼，9 个候选，`-`/`=` 上下翻页 |
 | 免密 sudo | 开启 | 为目标用户写入独立 `NOPASSWD` 规则；安全要求较高时改为 `N` |
 
@@ -168,13 +164,13 @@ CPA API key 输入时只显示 `*` 掩码，真实字符不回显；凭据保存
 CPA Provider 会直接写入当前用户的 `~/.codex/config.toml`，安装完成后使用标准命令 `codex`；项目不要求额外的包装命令。
 启用 Codex 时会按照 [OpenAI Linux sandbox 指南](https://developers.openai.com/codex/sandboxing) 安装 `bubblewrap`、`apparmor-profiles` 和 `apparmor-utils`，复制并加载 Ubuntu 24.04 的 `bwrap-userns-restrict` profile，再执行不调用 API 的本地 sandbox 验证。
 
-Docker Engine 默认从 Docker 官方源安装，包含 daemon、CLI、Compose、Buildx、用户组和代理配置；如检测到 Ubuntu `docker.io`，APT 会在同一事务中迁移到 Docker CE，不主动删除 `/var/lib/docker`。如确实不需要，可在交互中改为 `N`。Codex/CPA、固定网络、UFW、关闭 SSH 密码登录与免密 sudo 在各自配置分类中独立选择。
+Docker 支持本机 rootful CE 和 docker.io。全新系统启用上游源时默认 CE；已有 docker.io 不迁移为 CE，已有 CE 也不会因关闭上游源而迁回 docker.io。CE 使用 `docker-compose-plugin`/`docker-buildx-plugin`，发行版使用 `docker-compose-v2`/`docker-buildx`；不要求发行版安装具备 CE 专用包。健康 daemon 直接复用，停止的正常服务只启动；masked、failed、CLI-only、rootless-only、远程、Desktop、Podman 或不明安装会停止并提示诊断。同来源升级仍可由 APT 升级策略执行。代理变化时保留原有开发功能并更新本项目代理配置；相同代理配置重复运行不重启 Docker。无需关闭 `INSTALL_DOCKER` 规避冲突。
 
 Fcitx5/Rime 默认开启；不需要时可在交互中选择 `N`，或设置 `CONFIGURE_FCITX5_RIME=false`。安装器会启用 Ubuntu 24.04 Universe，安装 GTK3、GTK4、Qt5 前端及 Rime 的 Lua/Octagram 插件，再通过 [Plum](https://github.com/rime/plum) 的 GitHub HTTPS 仓库把 [雾凇拼音](https://github.com/iDvel/rime-ice) 安装到固定目录 `~/.local/share/fcitx5/rime`。`~/.config/fcitx5/profile` 只保留 `keyboard-us` 与 `rime`，并设置 `DefaultIM=rime`；全局配置同时设置 `ActiveByDefault=True`，因此重新登录后直接进入中文，`Ctrl+Space` 仍可切换英文。
 
 Rime 配置只启用 `rime_ice`，每页显示 9 个候选，`-` 上一页、`=` 下一页。配置不会加入 `__include: rime_ice_suggestion:/`，避免 Plum 当前布局下的 unresolved dependency。首次运行时，如果 Rime 目录非空且尚未安装雾凇，原目录会复制到 `~/.local/share/fcitx5/rime.bak.YYYYmmdd-HHMMSS` 后再清空；检测到已有 `rime_ice.schema.yaml` 时会保留用户词库并原地更新。GNOME Wayland 的 Kimpanel 提示不影响安装，只有候选窗定位异常时才需要另行处理。
 
-完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，配置带 `signed-by` 的独立软件源、更新索引、升级现有包，再安装或升级完整工具链。受管源包括 [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)、[Git Core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa)、[Git LFS](https://packagecloud.io/github/git-lfs)、[Kitware APT](https://apt.kitware.com/) 和启用 Docker 时的 [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)；不使用已弃用的 `apt-key` 或 `curl | bash`。其余 Ubuntu 系统库继续跟随 24.04 的安全维护版本，不盲目混用第三方仓库。
+完整安装采用两层依赖检查：代理配置前只补齐自动发现代理所需的最小启动包；代理生效后，配置带 `signed-by` 的独立软件源、更新索引、升级现有包，再安装或升级完整工具链。受管源包括 [GitHub CLI](https://github.com/cli/cli/blob/trunk/docs/install_linux.md)、[Git Core PPA](https://launchpad.net/~git-core/+archive/ubuntu/ppa)、[Git LFS](https://packagecloud.io/github/git-lfs)、[Kitware APT](https://apt.kitware.com/) 和首次选择 CE 时的 [Docker Engine](https://docs.docker.com/engine/install/ubuntu/)；不使用已弃用的 `apt-key` 或 `curl | bash`。其余 Ubuntu 系统库继续跟随 24.04 的安全维护版本，不盲目混用第三方仓库。
 
 为支持在 Ubuntu 主机上构建 `mdd-sim-gateway`，默认工具链还包含 Node.js/npm/node-gyp、Meson/Ninja、Autotools、CMake、SWIG、PC/SC/CCID/vpcd、libcurl/OpenSSL 开发包、ModemManager 和 Python 开发环境；启用 Codex 时额外安装 bubblewrap/AppArmor sandbox 依赖。WebUI 的正式安装仍使用固定 Node 容器构建，宿主机 Node/npm 则可用于本地开发、依赖检查及 npm 原生模块构建。
 
@@ -201,10 +197,10 @@ gh auth login --hostname github.com --git-protocol https --web
 完成后可以直接从 Windows PowerShell 连接：
 
 ```powershell
-ssh -p 22 suyi@192.168.1.254
+ssh -p 22 suyi@<实际管理IPv4>
 ```
 
-请替换为安装时选择的端口、用户和最终 IPv4。在首次 SSH 安装尚未重启时，当前会话仍使用 DHCP 地址；重启后改用安装器显示的固定地址。
+请替换为安装时选择的端口、用户和最终 IPv4。保持模式使用实际管理地址；显式配置静态网络后，当前地址和待生效地址会分别显示。
 
 ## 8. 完成安装与验证
 
@@ -222,7 +218,7 @@ sudo bash install.sh --phase validate
 sudo bash install.sh --status
 ```
 
-SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启同时完成 Fcitx5 所需的桌面重新登录。回来后默认应为中州韵，输入 `shi` 应显示 9 个候选，并可用 `-`/`=` 翻页。固定地址、Docker 用户权限和其余检查全部通过后，最终状态才会成为 `complete`。
+SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启同时完成 Fcitx5 所需的桌面重新登录。回来后默认应为中州韵，输入 `shi` 应显示 9 个候选，并可用 `-`/`=` 翻页。实际网络状态、Docker 用户权限和其余检查全部通过后，最终状态才会成为 `complete`。
 
 ## 9. 常用命令
 
@@ -280,7 +276,7 @@ pgrep -a -u "$USER" -x vmtoolsd | grep -- '-n vmusr'
 ~/.config/vmware-ubuntu-bootstrap/      用户配置与 CPA 凭据
 ```
 
-网络变更使用 `netplan try --timeout 120`。未确认时应自动回滚；如果仍失去网络，请在 VMware 控制台按照 [`docs/recovery.md`](docs/recovery.md) 恢复。
+控制台立即应用使用 `netplan try --timeout 120`，超时或失败时恢复原配置。SSH 写入磁盘后等待重启，重启后不提供自动回滚保证；如果仍失去网络，请在 VMware 控制台按照 [`docs/recovery.md`](docs/recovery.md) 恢复。
 
 ## 12. 文档与测试
 

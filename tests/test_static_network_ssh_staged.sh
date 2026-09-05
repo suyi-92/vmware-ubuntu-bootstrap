@@ -43,16 +43,15 @@ cat >"$BIN_DIR/ip" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 case "$*" in
-  "link show dev ens33") exit 0 ;;
-  "-4 -o addr show dev ens33 scope global")
-    echo "2: ens33    inet 192.168.1.120/24 brd 192.168.1.255 scope global ens33"
-    ;;
-  *) exit 0 ;;
+  "-j link show") echo '[{"ifname":"ens33","link_type":"ether","address":"02:00:00:00:00:01"}]' ;;
+  "-j -4 addr show") echo '[{"ifname":"ens33","addr_info":[{"family":"inet","local":"192.168.1.120","prefixlen":24,"scope":"global"}]}]' ;;
+  "-j -4 route show default") echo '[{"dev":"ens33","gateway":"192.168.1.1"}]' ;;
+  *) exit 1 ;;
 esac
 EOF
 cat >"$BIN_DIR/arping" <<'EOF'
 #!/usr/bin/env bash
-exit 0
+if [[ "$*" == -V ]]; then echo 'arping from iputils'; else printf 'Sent 2 probes (2 broadcast(s))\nReceived 0 response(s)\n'; fi
 EOF
 cat >"$BIN_DIR/netplan" <<'EOF'
 #!/usr/bin/env bash
@@ -69,6 +68,8 @@ export VUB_STATE_DIR="$FIXTURE_ROOT/state"
 export VUB_LOG_DIR="$FIXTURE_ROOT/log"
 export VUB_BACKUP_ROOT="$FIXTURE_ROOT/backups"
 export VUB_NETPLAN_DIR="$NETPLAN_DIR"
+export VUB_NETPLAN_RUN_DIR="$FIXTURE_ROOT/run"
+export VUB_NETPLAN_LIB_DIR="$FIXTURE_ROOT/lib"
 export VUB_NETPLAN_FILE="$NETPLAN_DIR/90-vmware-ubuntu-bootstrap-static.yaml"
 export SSH_CONNECTION="192.0.2.10 50000 192.0.2.20 22"
 
@@ -80,9 +81,9 @@ source "$VUB_STATE_DIR/static-network.state"
 [[ "$status" == "pending-reboot" ]]
 [[ "$detail" == "ip=192.168.1.254/24;gateway=192.168.1.1;activation=reboot" ]]
 [[ -f "$VUB_STATE_DIR/reboot-required" ]]
-[[ "$(stat -c '%U:%G:%a' "$ORIGINAL_NETPLAN")" == "root:root:600" ]]
+[[ "$(stat -c '%U:%G:%a' "$ORIGINAL_NETPLAN")" == "root:root:644" ]]
 grep -Fq 'dhcp4: false' "$VUB_NETPLAN_FILE"
-grep -Fq 'addresses: [192.168.1.254/24]' "$VUB_NETPLAN_FILE"
+grep -Fq -- '- 192.168.1.254/24' "$VUB_NETPLAN_FILE"
 grep -Fxq 'generate' "$COMMAND_LOG"
 ! grep -Eq '(^| )(apply|try)( |$)' "$COMMAND_LOG"
 

@@ -169,7 +169,7 @@ configure_upstream_apt_sources() {
   printf 'deb [arch=%s signed-by=%s] https://apt.kitware.com/ubuntu/ %s main\n' \
     "$architecture" "$KITWARE_KEY" "$codename" | write_apt_source "$KITWARE_SOURCE"
 
-  if is_true "$INSTALL_DOCKER"; then
+  if is_true "$INSTALL_DOCKER" && [[ "${DOCKER_SOURCE_KIND:-}" == ce && "${DOCKER_STATE:-}" == absent ]]; then
     install_apt_repository_key \
       "Docker" \
       "https://download.docker.com/linux/ubuntu/gpg" \
@@ -183,10 +183,8 @@ Components: stable
 Architectures: $architecture
 Signed-By: $DOCKER_KEY
 EOF
-  else
-    remove_managed_path "$DOCKER_SOURCE"
-    remove_managed_path "$DOCKER_KEY"
   fi
+  # Existing Docker sources and keys belong to the existing installation. Preserve them.
 }
 
 remove_upstream_apt_sources() {
@@ -194,12 +192,12 @@ remove_upstream_apt_sources() {
   # Remove source definitions first so an interruption never leaves a source without its key.
   for path in \
     "$GITHUB_CLI_SOURCE" "$GIT_CORE_SOURCE" "$GIT_LFS_SOURCE" \
-    "$KITWARE_SOURCE" "$DOCKER_SOURCE"; do
+    "$KITWARE_SOURCE"; do
     remove_managed_path "$path"
   done
   for path in \
     "$GITHUB_CLI_KEY" "$GIT_CORE_KEY" "$GIT_LFS_KEY" \
-    "$KITWARE_KEY" "$DOCKER_KEY"; do
+    "$KITWARE_KEY"; do
     remove_managed_path "$path"
   done
 }

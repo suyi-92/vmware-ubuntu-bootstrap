@@ -106,7 +106,7 @@ handle_phase_failure() {
   warn "阶段失败：$phase"
   VUB_PHASE_NAME="$phase"
   export VUB_PHASE_NAME
-  mark_phase failed "phase command failed" || true
+  if [[ "$phase" != static-network ]]; then mark_phase failed "phase command failed" || true; fi
   case "$phase" in
     proxy|proxy-off|packages|input-method|sudo-policy|static-network|power|ssh|codex)
       if [[ -r "$VUB_STATE_DIR/active-backup" && -f "$PROJECT_DIR/scripts/10-rollback.sh" ]]; then

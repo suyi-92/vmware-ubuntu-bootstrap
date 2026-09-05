@@ -192,13 +192,13 @@ install_missing_apt_packages() {
   info "$description：发现 $VUB_LAST_MISSING_PACKAGE_COUNT 个缺失包：${missing[*]}"
   run_logged "APT 更新索引" env DEBIAN_FRONTEND=noninteractive apt-get update
   run_logged "$description" env DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y --no-install-recommends "${missing[@]}"
+    apt-get install -y --no-remove --no-install-recommends "${missing[@]}"
 }
 
 upgrade_installed_apt_packages() {
   require_command apt-get
   run_logged "升级当前已安装的 APT 软件包" \
-    env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --with-new-pkgs
+    env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y --with-new-pkgs --no-remove
 }
 
 install_or_upgrade_apt_packages() {
@@ -206,58 +206,62 @@ install_or_upgrade_apt_packages() {
   shift
   (( $# > 0 )) || die "$description 没有收到软件包列表。"
   require_command apt-get
-  run_logged "$description" env DEBIAN_FRONTEND=noninteractive \
-    apt-get install -y --no-install-recommends "$@"
+  if is_dry_run; then
+    info "DRY-RUN: $description: apt-get install -y --no-remove --no-install-recommends $*"
+  else
+    docker_safe_apt_install fresh --no-install-recommends "$@"
+  fi
+}
+
+# shellcheck source=docker-local.sh
+source "$VUB_SCRIPT_DIR/docker-local.sh"
+
+select_docker_source() {
+  DOCKER_STATE=$(docker_detect)
+  case "$DOCKER_STATE" in
+    healthy-*|stopped-*) DOCKER_SOURCE_KIND=${DOCKER_STATE#*-} ;;
+    absent)
+      DOCKER_SOURCE_KIND=distro
+      is_true "$ENABLE_UPSTREAM_APT_SOURCES" && DOCKER_SOURCE_KIND=ce
+      ;;
+    *) docker_existing_error; return 1 ;;
+  esac
+  export DOCKER_STATE DOCKER_SOURCE_KIND
 }
 
 verify_docker_runtime() {
   if is_dry_run; then
-    info "DRY-RUN: verify docker.socket, docker.service and docker info"
+    info "DRY-RUN: verify local rootful Docker at unix:///var/run/docker.sock"
     return 0
   fi
-
-  require_command systemctl
-  require_command docker
-  if ! systemctl is-enabled --quiet docker.socket; then
-    die "Docker socket 未设为开机启用。"
-  fi
-  if ! systemctl is-active --quiet docker.socket; then
-    die "Docker socket 未运行。"
-  fi
-  if ! systemctl is-enabled --quiet docker.service; then
-    die "Docker service 未设为开机启用。"
-  fi
-  if ! systemctl is-active --quiet docker.service; then
-    die "Docker service 未运行。"
-  fi
-  if ! docker info >/dev/null 2>&1; then
-    die "Docker daemon 无法响应 docker info。"
-  fi
+  docker_local_healthy || die "本机 rootful Docker 验收失败；请诊断现有服务，不要卸载换源。"
 }
 
 activate_docker_runtime() {
-  if ! is_dry_run; then
-    require_command systemctl
-    require_command docker
+  if is_dry_run; then
+    info "DRY-RUN: reuse healthy Docker or start an existing stopped docker.service"
+    return 0
   fi
-
-  if ! run systemctl daemon-reload; then
-    die "systemd 重新加载失败，无法启动 Docker。"
-  fi
-  if ! run systemctl reset-failed docker.service docker.socket; then
-    die "无法清除 Docker service/socket 的失败状态。"
-  fi
-  if ! run systemctl enable docker.socket docker.service; then
-    die "无法将 Docker service/socket 设为开机启用。"
-  fi
-  if ! run systemctl start docker.socket; then
-    die "Docker socket 启动失败。"
-  fi
-  if ! run systemctl restart docker.service; then
-    die "Docker service 启动失败；请查看 journalctl -xeu docker.service。"
-  fi
-
+  case "$(docker_detect)" in
+    healthy-*) info "复用现有 Docker；保留软件包来源。" ;;
+    stopped-*) docker_start_existing || die "Docker service 启动失败。" ;;
+    *) docker_existing_error; return 1 ;;
+  esac
   verify_docker_runtime
+}
+
+docker_packages_for_source() {
+  case "$DOCKER_SOURCE_KIND" in
+    ce) printf '%s\n' docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin ;;
+    distro) printf '%s\n' docker.io docker-buildx docker-compose-v2 ;;
+    *) die "无法确认 Docker 软件包来源。" ;;
+  esac
+}
+
+verify_docker_tools() {
+  if is_dry_run; then return 0; fi
+  docker_local compose version >/dev/null || die "缺少 Docker Compose：请安装与现有来源一致的插件。"
+  docker_local buildx version >/dev/null || die "缺少 Docker Buildx：请安装与现有来源一致的插件。"
 }
 
 validate_sudoers_username() {
@@ -440,10 +444,11 @@ apply_config_defaults() {
   : "${PROXY_HOST:=}"
   : "${PROXY_PORT:=7890}"
   : "${PROXY_SCAN_CIDR:=}"
-  : "${CONFIGURE_STATIC_NETWORK:=true}"
-  : "${STATIC_IPV4_PREFIX:=192.168.1}"
-  : "${STATIC_IPV4_LAST_OCTET:=254}"
-  : "${PREFIX_LENGTH:=24}"
+  : "${CONFIGURE_STATIC_NETWORK:=false}"
+  : "${STATIC_IPV4_PREFIX:=}"
+  : "${STATIC_IPV4_LAST_OCTET:=}"
+  : "${PREFIX_LENGTH:=}"
+  : "${STATIC_IPV4_CIDR:=}"
   : "${GATEWAY_IPV4:=}"
   : "${DNS_SERVERS:=}"
   : "${HOSTNAME:=}"
@@ -475,6 +480,7 @@ load_config() {
     die "找不到配置文件：$VUB_CONFIG_FILE"
   fi
   apply_config_defaults
+  normalize_static_address
 }
 
 validate_bool() {
@@ -542,11 +548,8 @@ validate_config() {
   validate_bool INSTALL_DOCKER
   validate_bool CONFIGURE_FCITX5_RIME
   validate_bool ENABLE_PASSWORDLESS_SUDO
-  [[ "$STATIC_IPV4_PREFIX" == "192.168.1" ]] || die "首版 STATIC_IPV4_PREFIX 必须为 192.168.1。"
-  [[ "$STATIC_IPV4_LAST_OCTET" =~ ^[0-9]+$ ]] || die "静态 IP 末位必须是数字。"
-  (( STATIC_IPV4_LAST_OCTET >= 2 && STATIC_IPV4_LAST_OCTET <= 254 )) \
-    || die "静态 IP 末位只能是 2–254；255 是广播地址。"
-  [[ "$PREFIX_LENGTH" == "24" ]] || die "首版 PREFIX_LENGTH 必须为 24。"
+  normalize_static_address
+  if is_true "$CONFIGURE_STATIC_NETWORK"; then validate_static_network; fi
   [[ -z "$NETWORK_INTERFACE" || "$NETWORK_INTERFACE" =~ ^[A-Za-z0-9_.-]+$ ]] \
     || die "NETWORK_INTERFACE 不合法：$NETWORK_INTERFACE"
   if [[ -n "$PROXY_HOST" ]]; then
@@ -573,37 +576,8 @@ PY
   fi
 }
 
-current_interface() {
-  ip -4 route show default 2>/dev/null | awk 'NR==1 {print $5}'
-}
-
-current_ipv4() {
-  local iface="${1:-$(current_interface)}"
-  ip -4 -o addr show dev "$iface" scope global 2>/dev/null | awk 'NR==1 {split($4,a,"/"); print a[1]}'
-}
-
-current_gateway() {
-  ip -4 route show default 2>/dev/null | awk 'NR==1 {print $3}'
-}
-
-current_dns_servers() {
-  local iface="${1:-$(current_interface)}" result=""
-  if command -v resolvectl >/dev/null 2>&1; then
-    result="$(resolvectl dns "$iface" 2>/dev/null | sed -E 's/^.*:[[:space:]]*//' | tr '\n' ' ' | xargs || true)"
-  fi
-  if [[ -z "$result" && -r /etc/resolv.conf ]]; then
-    result="$(awk '/^nameserver[[:space:]]+/ {print $2}' /etc/resolv.conf | tr '\n' ' ' | xargs || true)"
-  fi
-  printf '%s\n' "$result"
-}
-
-cidr24_for_ip() {
-  python3 - "$1" <<'PY'
-import ipaddress
-import sys
-print(ipaddress.ip_network(f"{sys.argv[1]}/24", strict=False))
-PY
-}
+# shellcheck source=network-lib.sh
+source "$VUB_SCRIPT_DIR/network-lib.sh"
 
 init_runtime_dirs() {
   if is_dry_run; then
@@ -677,6 +651,8 @@ init_backup_dir() {
     info "DRY-RUN: create backup $VUB_BACKUP_DIR"
     return 0
   fi
+  VUB_BACKUP_DIR="$(mktemp -d "$VUB_BACKUP_ROOT/${stamp}-${safe_phase}.XXXXXX")"
+  export VUB_BACKUP_DIR
   install -d -m 0700 -o root -g root "$VUB_BACKUP_DIR/rootfs"
   {
     printf 'phase=%s\n' "$VUB_PHASE_NAME"
@@ -894,3 +870,35 @@ clear_reboot_required() {
 if is_true "$VUB_TESTING"; then
   :
 fi
+
+emit_config() {
+  printf '# Generated by install.sh. Do not commit.\n'
+  printf 'VUB_CONFIG_VERSION=%s\n' "$(shell_quote 5)"
+  printf 'TARGET_USER=%s\n' "$(shell_quote "$TARGET_USER")"
+  printf 'NETWORK_INTERFACE=%s\n' "$(shell_quote "$NETWORK_INTERFACE")"
+  printf 'PROXY_HOST=%s\n' "$(shell_quote "$PROXY_HOST")"
+  printf 'PROXY_PORT=%s\n' "$(shell_quote "$PROXY_PORT")"
+  printf 'PROXY_SCAN_CIDR=%s\n' "$(shell_quote "$PROXY_SCAN_CIDR")"
+  printf 'CONFIGURE_STATIC_NETWORK=%s\n' "$(shell_quote "$CONFIGURE_STATIC_NETWORK")"
+  printf 'STATIC_IPV4_CIDR=%s\n' "$(shell_quote "$STATIC_IPV4_CIDR")"
+  printf 'GATEWAY_IPV4=%s\n' "$(shell_quote "$GATEWAY_IPV4")"
+  printf 'DNS_SERVERS=%s\n' "$(shell_quote "$DNS_SERVERS")"
+  printf 'HOSTNAME=%s\n' "$(shell_quote "$HOSTNAME")"
+  printf 'TIMEZONE=%s\n' "$(shell_quote "$TIMEZONE")"
+  printf 'SSH_PORT=%s\n' "$(shell_quote "$SSH_PORT")"
+  printf 'ADMIN_PUBKEYS=%s\n' "$(shell_quote "$ADMIN_PUBKEYS")"
+  printf 'ENABLE_UFW=%s\n' "$(shell_quote "$ENABLE_UFW")"
+  printf 'DISABLE_SSH_PASSWORD=%s\n' "$(shell_quote "$DISABLE_SSH_PASSWORD")"
+  printf 'CONFIRM_SSH_KEY_LOGIN=%s\n' "$(shell_quote "$CONFIRM_SSH_KEY_LOGIN")"
+  printf 'CONFIGURE_CODEX=%s\n' "$(shell_quote "$CONFIGURE_CODEX")"
+  printf 'CPA_BASE_URL=%s\n' "$(shell_quote "$CPA_BASE_URL")"
+  printf 'CPA_MODEL_ID=%s\n' "$(shell_quote "$CPA_MODEL_ID")"
+  printf 'CPA_BYPASS_PROXY=%s\n' "$(shell_quote "$CPA_BYPASS_PROXY")"
+  printf 'RUN_CPA_SMOKE=%s\n' "$(shell_quote "$RUN_CPA_SMOKE")"
+  printf 'RUN_CODEX_SMOKE=%s\n' "$(shell_quote "$RUN_CODEX_SMOKE")"
+  printf 'ENABLE_UPSTREAM_APT_SOURCES=%s\n' "$(shell_quote "$ENABLE_UPSTREAM_APT_SOURCES")"
+  printf 'UPGRADE_INSTALLED_PACKAGES=%s\n' "$(shell_quote "$UPGRADE_INSTALLED_PACKAGES")"
+  printf 'INSTALL_DOCKER=%s\n' "$(shell_quote "$INSTALL_DOCKER")"
+  printf 'CONFIGURE_FCITX5_RIME=%s\n' "$(shell_quote "$CONFIGURE_FCITX5_RIME")"
+  printf 'ENABLE_PASSWORDLESS_SUDO=%s\n' "$(shell_quote "$ENABLE_PASSWORDLESS_SUDO")"
+}

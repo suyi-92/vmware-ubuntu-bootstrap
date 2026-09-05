@@ -5,7 +5,7 @@
 - 每个会改文件的阶段先在 `/var/backups/vmware-ubuntu-bootstrap/` 建立快照。
 - 当前阶段失败时，入口会尝试恢复该阶段受管文件。
 - 通过 SSH 安装时只写入并校验固定网络，重启前不会改变当前连接；直接在控制台应用时使用 `netplan try --timeout 120`，未确认则自动恢复网络。
-- 软件包安装本身不可通用回滚；`packages` 回滚会恢复受管 APT 源、密钥、hostname 和时间配置，但不会降级或卸载已经更新的软件包，也不会自动把 Docker CE 迁回 `docker.io`。
+- 软件包安装本身不可通用回滚；`packages` 回滚会恢复受管 APT 源、密钥、hostname 和时间配置，但不会降级或卸载已经更新的软件包，同来源升级不会自动换源；已有 Docker 源与数据不属于自动卸载/迁移对象。
 - `input-method` 会快照 `.xinputrc`、Fcitx5 配置和完整 Rime 用户目录；首次接管非空目录时还会留下用户可直接读取的 `rime.bak.YYYYmmdd-HHMMSS` 副本。回滚不卸载 APT 包，也不回退作为下载缓存的 `~/plum` Git 工作树。
 - `sudo-policy` 回滚会恢复执行前的受管 sudoers 文件；关闭免密 sudo 也只移除本项目管理的规则。
 
@@ -30,21 +30,18 @@ sudo bash install.sh --rollback 20260831-210000-static-network
 
 回滚前会再保存一次当前状态，因此可以撤销一次误回滚。
 
-## Docker CE 迁移后启动救援
+## 已有 Docker 异常
 
-如果从 Ubuntu `docker.io` 迁移到 Docker CE 后出现 `no sockets found via socket activation`，先恢复 socket 再启动 service：
+先诊断现有安装，不默认卸载重装：
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl reset-failed docker.service docker.socket
-sudo systemctl enable --now docker.socket
-sudo systemctl enable docker.service
-sudo systemctl restart docker.service
-systemctl status docker.socket docker.service --no-pager
-docker info
+sudo systemctl status docker.service --no-pager
+sudo journalctl -u docker.service -n 60 --no-pager
+dpkg-query -W docker-ce docker-ce-cli docker.io containerd.io containerd
+sudo env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock info
 ```
 
-这些命令不会删除 `/var/lib/docker` 中的镜像、容器或 volume。恢复后重新执行 `sudo bash install.sh --phase packages`，脚本只有在 `docker.socket`、`docker.service` 和 `docker info` 全部验收通过后才会把阶段标记为完成。
+部分 CE 安装使用 `dockerd -H fd://`，这时还需检查 `docker.socket`；其他健康布局不强制要求 socket unit。masked/failed/残留/不完整安装需管理员查明原因，安装器不会 reset-failed、unmask 或通过换包掩盖错误。正常停止的服务可由安装器有界启动。保留现有数据目录、daemon.json 和其他项目的配置。
 
 ## 输入法恢复
 
@@ -58,17 +55,18 @@ sudo bash install.sh --phase input-method
 
 ## 网络救援
 
-如果通过 SSH 写入固定网络后尚未重启，可以先回滚对应的 `static-network` 备份，或在确认不需要该配置后删除受管 Netplan 文件。重启后如果因为地址、网关或 DNS 设置错误而失去网络，在 VMware 控制台执行：
+保持模式不会删除旧静态文件或旧 `pending-reboot`。需要撤销时使用**那次 static-network 阶段的备份 ID**，不能假定最后一次备份就是网络备份：
 
 ```bash
-sudo rm -f /etc/netplan/90-vmware-ubuntu-bootstrap-static.yaml
-sudo netplan generate
-sudo netplan apply
-ip -4 address
-ip -4 route
+sudo ls -1 /var/backups/vmware-ubuntu-bootstrap
+sudo bash install.sh --rollback <static-network备份ID>
 ```
 
-如果原始 netplan 也被外部修改，使用对应备份目录的 `rootfs/etc/netplan/` 恢复，而不是猜测配置。
+SSH 回滚只恢复磁盘配置并执行语法生成，不立即 `netplan apply`，以保留当前连接。核对恢复后的文件、原地址和路由后，再由用户选择在 VMware 控制台应用或重启。控制台回滚会应用恢复后的配置。
+
+静态地址阶段可能同时清理原 YAML 中该接口的 IPv4 地址/默认路由，以防 Netplan 合并出多个默认路由；所以**仅删除受管 YAML 并不足以恢复原网络**。回滚入口不可用时，在 VMware 控制台按目标备份的 `paths.tsv` 与 `rootfs/` 恢复所有原文件，并删除清单中标记 `absent` 的新文件。随后执行 `sudo netplan generate` 和 `sudo netplan try --timeout 120`，核对接口地址、网关与 DNS。不要猜测 DHCP 原配置。
+
+SSH 待重启配置没有开机自动回滚保证；离线冲突、DHCP 后续分配和并发安装也可能使此前 ARP 检测失效。
 
 ## SSH 救援
 

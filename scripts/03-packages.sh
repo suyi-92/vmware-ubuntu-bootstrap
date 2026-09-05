@@ -15,6 +15,7 @@ validate_config
 load_proxy_state || warn "尚无持久化代理状态；APT 将使用当前环境或直连。"
 
 require_command apt-get
+if is_true "$INSTALL_DOCKER"; then select_docker_source || die "Docker 状态不允许继续安装。"; fi
 
 install_missing_apt_packages "安装 APT 软件源管理依赖" \
   ca-certificates curl gnupg software-properties-common
@@ -58,7 +59,7 @@ PACKAGES=(
 # pyscard 和 lpac；Engine 与 WebUI 仍由 Docker 构建，宿主机 Node/npm 用于
 # WebUI 本地开发和 npm 原生模块构建。
 MDD_BUILD_PACKAGES=(
-  autoconf automake cmake flex help2man libtool meson ninja-build patch perl swig
+  python3-yaml autoconf automake cmake flex help2man libtool meson ninja-build patch perl swig
   libccid pcscd pcsc-tools vsmartcard-vpcd
   libpcsclite-dev libudev-dev libsystemd-dev libusb-1.0-0-dev zlib1g-dev
   libffi-dev libssl-dev libcurl4-openssl-dev openssl
@@ -80,18 +81,9 @@ if is_true "$CONFIGURE_CODEX"; then
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
-    PACKAGES+=(
-      docker-ce docker-ce-cli containerd.io
-      docker-buildx-plugin docker-compose-plugin
-    )
-    if dpkg-query -W -f='${Status}\n' docker.io 2>/dev/null \
-        | grep -Fxq 'install ok installed'; then
-      warn "检测到 Ubuntu docker.io；APT 将原子迁移到 Docker CE，现有 /var/lib/docker 数据不会被主动删除。"
-    fi
-  else
-    PACKAGES+=(docker.io)
-  fi
+  mapfile -t DOCKER_PACKAGES < <(docker_packages_for_source)
+  PACKAGES+=("${DOCKER_PACKAGES[@]}")
+  info "Docker 来源：$DOCKER_SOURCE_KIND（现有安装优先）"
 fi
 
 install_or_upgrade_apt_packages "安装或升级常用、运行与构建软件包" "${PACKAGES[@]}"
@@ -161,16 +153,6 @@ if systemctl list-unit-files open-vm-tools.service 2>/dev/null | grep -q '^open-
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  if is_true "$ENABLE_UPSTREAM_APT_SOURCES" && ! is_dry_run; then
-    for docker_package in docker-ce docker-ce-cli containerd.io \
-      docker-buildx-plugin docker-compose-plugin; do
-      dpkg-query -W -f='${Status}\n' "$docker_package" 2>/dev/null \
-        | grep -Fxq 'install ok installed' \
-        || die "Docker 官方软件包安装失败：$docker_package"
-    done
-  fi
-  # Docker CE 通过 -H fd:// 从 docker.socket 获取 API listener。docker.io
-  # 迁移后显式 reload 并先启动 socket，避免 service 找不到 listener。
   activate_docker_runtime
   if ! id -nG "$REAL_USER" | tr ' ' '\n' | grep -Fxq docker; then
     run usermod -aG docker "$REAL_USER"
@@ -199,9 +181,10 @@ if is_true "$INSTALL_DOCKER" && [[ -r "$VUB_ETC_DIR/proxy.env" ]]; then
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  # 代理阶段会重载并重启 Docker；只有最终存活检查通过才能完成阶段。
+  # 最终验证使用同一个本机 endpoint。
   verify_docker_runtime
-  if ! is_dry_run && ! run_as_user docker info >/dev/null 2>&1; then
+  verify_docker_tools
+  if ! is_dry_run && ! run_as_user env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock info >/dev/null 2>&1; then
     die "用户 $REAL_USER 无法访问 Docker daemon。"
   fi
 fi

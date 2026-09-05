@@ -96,7 +96,6 @@ fi
 
 if is_true "$ENABLE_UPSTREAM_APT_SOURCES"; then
   required_apt_paths=("${CORE_UPSTREAM_APT_PATHS[@]}")
-  is_true "$INSTALL_DOCKER" && required_apt_paths+=("${DOCKER_APT_PATHS[@]}")
   for apt_path in "${required_apt_paths[@]}"; do
     [[ -f "$apt_path" && ! -L "$apt_path" ]] \
       || die "上游 APT 配置不存在或不安全：$apt_path"
@@ -158,13 +157,10 @@ if is_true "$CONFIGURE_FCITX5_RIME"; then
 fi
 
 if is_true "$INSTALL_DOCKER"; then
-  command -v docker >/dev/null 2>&1 || die "Docker CLI 未安装。"
-  systemctl is-enabled --quiet docker.socket || die "Docker socket 未设为开机启用。"
-  systemctl is-active --quiet docker.socket || die "Docker socket 未运行。"
-  systemctl is-enabled --quiet docker.service || die "Docker service 未设为开机启用。"
-  systemctl is-active --quiet docker.service || die "Docker daemon 未运行。"
-  docker info >/dev/null 2>&1 || die "Docker daemon 不可用。"
-  run_as_user docker info >/dev/null 2>&1 || die "普通用户无权访问 Docker daemon。"
+  verify_docker_runtime
+  verify_docker_tools
+  run_as_user env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock info >/dev/null 2>&1 \
+    || die "普通用户无权访问本机 Docker daemon。"
   DOCKER_ENVIRONMENT="$(systemctl show docker --property=Environment --value 2>/dev/null || true)"
   grep -Fq "HTTP_PROXY=$EXPECTED_PROXY" <<<"$DOCKER_ENVIRONMENT" \
     || die "Docker daemon HTTP 代理验收失败。"
@@ -201,27 +197,15 @@ if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
 fi
 
 if is_true "$CONFIGURE_STATIC_NETWORK"; then
-  NETPLAN_DIR="${VUB_NETPLAN_DIR:-/etc/netplan}"
-  netplan_files=()
-  shopt -s nullglob
-  netplan_files=("$NETPLAN_DIR"/*.yaml "$NETPLAN_DIR"/*.yml)
-  shopt -u nullglob
-  for netplan_path in "${netplan_files[@]}"; do
-    [[ ! -L "$netplan_path" ]] || die "Netplan 配置不能是符号链接：$netplan_path"
-    [[ "$(stat -c '%U:%G:%a' "$netplan_path")" == "root:root:600" ]] \
-      || die "Netplan 文件权限验收失败：$netplan_path"
-  done
+  validate_managed_netplan_file
   STATIC_NETWORK_STATUS="$(sed -nE 's/^status=(.*)$/\1/p' "$VUB_STATE_DIR/static-network.state" 2>/dev/null | head -n1 || true)"
   if [[ "$STATIC_NETWORK_STATUS" == "pending-reboot" ]] && is_true "$REBOOT_PENDING_FOR_CURRENT_BOOT"; then
-    warn "固定网络已写入磁盘；当前 SSH 地址保持不变，重启后切换到 ${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}/${PREFIX_LENGTH}。"
+    warn "固定网络已写入磁盘；当前 SSH 地址保持不变，重启后切换到 $STATIC_IPV4_CIDR。"
   else
-    TARGET_IPV4="${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
-    ip -4 addr show dev "$NETWORK_INTERFACE" | grep -Fq "${TARGET_IPV4}/${PREFIX_LENGTH}" \
-      || die "固定 IPv4 验收失败。"
-    ip -4 route show default | grep -Fq "via ${GATEWAY_IPV4}" || die "默认网关验收失败。"
+    static_network_is_live || die "静态 IPv4 或管理接口网关验收失败。"
     getent hosts github.com >/dev/null 2>&1 || die "DNS 验收失败。"
     if [[ "$STATIC_NETWORK_STATUS" == "pending-reboot" ]]; then
-      mark_named_phase static-network complete "ip=${TARGET_IPV4}/${PREFIX_LENGTH};gateway=$GATEWAY_IPV4;activated-after-reboot"
+      mark_named_phase static-network complete "ip=$STATIC_IPV4_CIDR;gateway=$GATEWAY_IPV4;activated-after-reboot"
     fi
   fi
 fi
@@ -299,22 +283,28 @@ PY
     "$VUB_PROJECT_DIR" "$VUB_LOG_DIR" || die "API key 泄漏到仓库或日志。"
 fi
 
+show_network_state
 FINAL_STATUS="configured-pending-reboot"
 if [[ -f "$VUB_STATE_DIR/reboot-required" ]]; then
   if is_true "$REBOOT_OCCURRED_AFTER_MARKER"; then
-    clear_reboot_required
-    FINAL_STATUS="complete"
+    if ! grep -q '^status=pending-reboot$' "$VUB_STATE_DIR/static-network.state" 2>/dev/null; then
+      clear_reboot_required
+      FINAL_STATUS="complete"
+    fi
   fi
 else
   FINAL_STATUS="complete"
 fi
 
-mark_phase "$FINAL_STATUS" "all checks passed"
+if grep -q '^status=pending-reboot$' "$VUB_STATE_DIR/static-network.state" 2>/dev/null; then
+  FINAL_STATUS="configured-pending-reboot"
+fi
+mark_phase "$FINAL_STATUS" "requested checks passed; see retained network state"
 if [[ "$FINAL_STATUS" == "complete" ]]; then
   info "全部验收通过。"
 else
   warn "配置验收通过，但仍需重启后再次运行：sudo bash install.sh --phase validate"
   if is_true "$CONFIGURE_STATIC_NETWORK"; then
-    info "重启后请从 Windows 连接：ssh -p $SSH_PORT $REAL_USER@${STATIC_IPV4_PREFIX}.${STATIC_IPV4_LAST_OCTET}"
+    info "重启后请从 Windows 连接：ssh -p $SSH_PORT $REAL_USER@${STATIC_IPV4_CIDR%/*}"
   fi
 fi

@@ -64,21 +64,17 @@ bash <(wget -qO- https://raw.githubusercontent.com/suyi-92/vmware-ubuntu-bootstr
 
 安装器会询问是否为目标用户开启免密 sudo，默认 `Y`。首次启动仍需输入一次 Ubuntu 用户密码；只有 `sudo-policy` 阶段成功写入并通过 `visudo` 校验后，后续运行才不再询问密码。
 
-本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装包含 Node.js、npm、npx 与 node-gyp 的完整工具链。Docker 默认从官方源安装 Docker CE、Compose 和 Buildx。输入法阶段默认通过 GitHub HTTPS 安装 Plum 与雾凇拼音，把 Rime 固定部署到 `~/.local/share/fcitx5/rime`，并把中州韵设为登录后直接激活的默认中文输入法。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
+本地安装器会在交互前完成最小启动依赖检查。完整配置时先建立代理，再校验密钥指纹并配置 GitHub CLI、Git/Git LFS、Kitware CMake 和 Docker（如启用）软件源，更新索引、升级已安装的 APT 包，并安装包含 Node.js、npm、npx 与 node-gyp 的完整工具链。全新系统默认从官方源安装 Docker CE、Compose 和 Buildx；已有 rootful CE/docker.io 保留来源，参见 [兼容说明](compatibility.md)。输入法阶段默认通过 GitHub HTTPS 安装 Plum 与雾凇拼音，把 Rime 固定部署到 `~/.local/share/fcitx5/rime`，并把中州韵设为登录后直接激活的默认中文输入法。启用 Codex 时还会按 Ubuntu 24.04 的要求安装 bubblewrap/AppArmor、加载 `bwrap-userns-restrict` profile，并执行本地 sandbox 验证。
 
 安装器从 `/dev/tty` 逐项读取配置。冒号后的普通值可直接回车采用，也可以编辑后确认；CPA API key 只显示 `*` 掩码，真实字符不回显。Windows SSH 公钥必须粘贴 `.pub` 内容，不得粘贴私钥。首次安装保持“关闭 SSH 密码登录”为 `N`，确认 Windows 公钥可以从另一终端登录后再改为 `Y`。公网 CPA `/v1` 地址必须使用 HTTPS。输入 key 后会请求 `/v1/models`：单模型自动采用，多模型按编号选择，已有模型作为默认项。
 
-## 4. 从 SSH 安装时的固定网络处理
+## 4. 网络默认保持与显式静态配置
 
-通过 SSH 运行完整安装时，脚本会先把现有 Netplan YAML 规范为 `root:root:600`、检查目标固定地址是否冲突，再写入并校验 Netplan，然后把网络阶段标记为 `pending-reboot`。它不会在当前会话中执行 `netplan apply`，因此当前 DHCP SSH 连接不会中断，后续软件包、VMware Tools、SSH 和 Codex 阶段可以继续完成。
+新配置默认保持当前网络，记录实际管理网卡、IPv4/CIDR、网关、MAC，推荐在路由器按各 VM 独立 MAC 做 DHCP 地址保留。此阶段不会把 DHCP 租约转成静态，也不会将已有静态配置恢复为 DHCP。
 
-其余阶段完成后直接在当前 SSH 会话执行：
+只有明确启用 `CONFIGURE_STATIC_NETWORK=true` 时才输入完整 `STATIC_IPV4_CIDR`、所选管理接口的网关和 DNS。多默认路由需要明确选择物理以太网卡；不自动选择 Docker bridge、VPN 或蜂窝接口。配置与 ARP 检测不能被 `--yes` 跳过。
 
-```bash
-sudo reboot
-```
-
-连接会正常断开。虚拟机启动后，从 Windows 使用安装器显示的固定地址重新 SSH 登录。无需回 VMware 控制台再次运行安装器。只有直接从 VMware 控制台运行 `static-network` 阶段时，脚本才会用 `netplan try --timeout 120` 立即切换；未确认时自动回滚。
+SSH 会话只备份和写盘，经 `netplan generate` 后记为 `pending-reboot`，显示当前地址、待生效地址和备份 ID。当前 SSH 不立即切换。记录恢复方法后由用户决定何时重启；重启后生效不含自动回滚保证。控制台使用 `netplan try --timeout 120`，真实应用并通过检查才记为 complete。完整旧配置、重复运行和回滚细节见 [兼容说明](compatibility.md) 及 [恢复说明](recovery.md)。
 
 ## 5. 分阶段运行
 

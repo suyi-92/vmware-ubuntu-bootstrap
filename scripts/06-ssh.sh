@@ -121,7 +121,11 @@ fi
 if is_true "$ENABLE_UFW" || is_true "$UFW_ACTIVE"; then
   require_command ufw
   backup_path /etc/ufw
-  run ufw allow from "$PROXY_SCAN_CIDR" to any port "$SSH_PORT" proto tcp comment 'vmware-ubuntu-bootstrap ssh'
+  MANAGEMENT_CIDRS=$(management_cidrs) || die "无法确定 SSH 管理来源网段。"
+  [[ -n "$MANAGEMENT_CIDRS" ]] || die "SSH 管理来源网段为空。"
+  while IFS= read -r lan_cidr; do
+    run ufw allow from "$lan_cidr" to any port "$SSH_PORT" proto tcp comment 'vmware-ubuntu-bootstrap ssh'
+  done <<<"$MANAGEMENT_CIDRS"
   if is_true "$ENABLE_UFW"; then
     run ufw --force enable
   else
@@ -134,3 +138,5 @@ complete_backup
 mark_phase complete "ssh_port=$SSH_PORT;ufw=$ENABLE_UFW;password_disabled=$DISABLE_SSH_PASSWORD"
 TARGET_IP="$(current_ipv4 "$NETWORK_INTERFACE")"
 info "SSH 配置完成。请从 Windows 验证：ssh -p $SSH_PORT $REAL_USER@$TARGET_IP"
+
+show_network_state

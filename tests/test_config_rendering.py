@@ -120,13 +120,14 @@ switcher:
         preflight = (ROOT / "scripts" / "01-preflight.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn('SSH_ACTIVATION_ON_REBOOT="true"', static_network)
+        self.assertIn('if [[ -n "${SSH_CONNECTION:-}" ]]; then', static_network)
         self.assertIn("mark_phase pending-reboot", static_network)
-        self.assertIn("重启后请从 Windows 连接", static_network)
-        self.assertIn("root:root:600", static_network)
-        self.assertIn("现有 Netplan YAML 文件", static_network)
-        self.assertNotIn("requires VMware console", static_network)
+        self.assertIn("netplan try --timeout 120", static_network)
+        self.assertIn('write_managed_file "$path" 0600 root root', static_network)
+        self.assertIn("network_cleanup", static_network)
         self.assertNotIn("固定网络将安全延后", preflight)
+        # Execution, timeout rollback and unchanged unrelated YAML permissions are
+        # checked by NetworkPhaseTests; global chmod/restart was the old contract.
 
     def test_toml_strings_are_escaped(self) -> None:
         rendered = render_codex_config.render(
@@ -198,7 +199,7 @@ switcher:
         self.assertIn(': "${UPGRADE_INSTALLED_PACKAGES:=true}"', shell_library)
         self.assertIn(': "${ENABLE_PASSWORDLESS_SUDO:=true}"', shell_library)
         self.assertIn(': "${TIMEZONE:=America/New_York}"', shell_library)
-        self.assertIn('VUB_CONFIG_VERSION="4"', example)
+        self.assertIn('VUB_CONFIG_VERSION="5"', example)
         self.assertIn('TIMEZONE="America/New_York"', example)
         self.assertIn('INSTALL_DOCKER="true"', example)
         self.assertIn('CONFIGURE_FCITX5_RIME="true"', example)
@@ -235,7 +236,7 @@ switcher:
             "docker-buildx-plugin",
             "docker-compose-plugin",
         ):
-            self.assertIn(package, packages)
+            self.assertIn(package, packages + shell_library)
         for source in (
             "https://cli.github.com/packages",
             "https://ppa.launchpadcontent.net/git-core/ppa/ubuntu",
@@ -251,8 +252,8 @@ switcher:
         self.assertIn("node --version", packages)
         self.assertIn("npm --version", packages)
         self.assertIn("npx --version", packages)
-        self.assertIn("systemctl start docker.socket", shell_library)
-        self.assertIn("systemctl restart docker.service", shell_library)
+        self.assertIn("docker_start_existing", shell_library)
+        self.assertIn("docker_local_healthy", shell_library)
         self.assertIn("NOPASSWD: ALL", shell_library)
         self.assertIn('visudo -cf "$sudoers_tmp"', sudo_policy)
         self.assertIn("sudo-policy", bootstrap)

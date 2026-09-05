@@ -39,12 +39,13 @@ upgrade_installed_apt_packages
 install_or_upgrade_apt_packages "测试升级安装" gh git-lfs
 
 grep -Fxq 'update' "$APT_LOG"
-grep -Fq 'install -y --no-install-recommends curl' "$APT_LOG"
+grep -Fq 'install -y --no-remove --no-install-recommends curl' "$APT_LOG"
 if grep -Eq '^install .* (git|ca-certificates)( |$)' "$APT_LOG"; then
   echo "FAIL: 已安装的软件包被重复传给 apt-get" >&2
   exit 1
 fi
-grep -Fxq 'upgrade -y --with-new-pkgs' "$APT_LOG"
-grep -Fq 'install -y --no-install-recommends gh git-lfs' "$APT_LOG"
+grep -Fxq 'upgrade -y --with-new-pkgs --no-remove' "$APT_LOG"
+grep -Fq -- '--simulate --no-remove install --no-install-recommends gh git-lfs' "$APT_LOG"
+grep -Fq 'install -y --no-remove --no-install-recommends gh git-lfs' "$APT_LOG"
 
 echo "dependency install: PASS"
