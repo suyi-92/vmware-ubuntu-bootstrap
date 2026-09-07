@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
@@ -118,6 +119,156 @@ printf '%s|%s\n' "$VUB_CONFIG_VERSION" "$STATIC_IPV4_CIDR"
             self.assertNotIn('STATIC_IPV4_LAST_OCTET',Path(str(cfg)+'.new').read_text())
 
 
+DESKTOP_VENDOR = 'network:\n  version: 2\n  renderer: NetworkManager\n'
+
+
+class VendorNetplanTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.vendor = self.root / 'lib/netplan'
+        self.vendor.mkdir(parents=True)
+
+    def write_vendor(self, name, content):
+        path = self.vendor / name
+        path.write_text(content, encoding='utf-8')
+        return path
+
+    def assert_rejected(self, path):
+        with self.assertRaises(ValueError) as caught:
+            nc.check_vendor_netplan(self.vendor)
+        self.assertIn(str(path), str(caught.exception))
+
+    def test_no_vendor_yaml(self):
+        self.assertEqual(nc.check_vendor_netplan(self.root / 'missing'), [])
+        self.assertEqual(nc.check_vendor_netplan(self.vendor), [])
+        self.write_vendor('ignored.yaml.bak', 'not YAML: [')
+        self.assertEqual(nc.check_vendor_netplan(self.vendor), [])
+
+    def test_desktop_renderer_semantics_and_extensions(self):
+        for name, content in [
+            ('00-network-manager-all.yaml', DESKTOP_VENDOR),
+            ('custom.yml', '# Desktop default\nnetwork:\n    renderer: "NetworkManager" # backend\n    version: 2\n\n'),
+            ('another.yaml', 'network: {renderer: NetworkManager, version: 2}\n'),
+            ('renderer-only.yml', 'network:\n  renderer: NetworkManager\n'),
+        ]:
+            with self.subTest(name=name):
+                path = self.write_vendor(name, content)
+                before = path.read_bytes(), path.stat().st_mode
+                self.assertEqual(nc.check_vendor_netplan(self.vendor), [path])
+                self.assertEqual((path.read_bytes(), path.stat().st_mode), before)
+                path.unlink()
+
+    def test_interface_and_other_network_settings_fail_closed(self):
+        for key in ('ethernets', 'wifis', 'bridges', 'bonds', 'vlans', 'tunnels',
+                    'modems', 'vrfs', 'nm-devices', 'dummy-devices', 'virtual-ethernets',
+                    'openvswitch', 'unknown'):
+            with self.subTest(key=key):
+                doc = {'network': {'version': 2, 'renderer': 'NetworkManager', key: {}}}
+                path = self.write_vendor('00-network-manager-all.yaml', yaml.safe_dump(doc))
+                self.assert_rejected(path)
+        path = self.write_vendor('00-network-manager-all.yaml',
+                                 DESKTOP_VENDOR + '  ethernets:\n    ens33:\n      dhcp4: true\n')
+        self.assert_rejected(path)
+
+    def test_empty_unknown_and_wrong_types_fail_closed(self):
+        for content in ('', '# comments only\n', 'null\n', '{}\n', '[]\n', 'plain text\n',
+                        'network: null\n', 'network: []\n', 'network: {}\n',
+                        DESKTOP_VENDOR + 'unknown: true\n',
+                        DESKTOP_VENDOR.replace('NetworkManager', 'networkd'),
+                        DESKTOP_VENDOR.replace('NetworkManager', '[NetworkManager]'),
+                        'network: {version: 2}\n',
+                        *[DESKTOP_VENDOR.replace('version: 2', f'version: {value}')
+                          for value in ('1', '3', '2.0', '"2"', 'true', 'null')]):
+            with self.subTest(content=content):
+                path = self.write_vendor('00-network-manager-all.yaml', content)
+                self.assert_rejected(path)
+
+    def test_malformed_and_multiple_documents_fail_closed(self):
+        for content in ('network:\n  renderer: [NetworkManager\n',
+                        DESKTOP_VENDOR + '---\n' + DESKTOP_VENDOR,
+                        'network: !!python/object:example {}\n'):
+            with self.subTest(content=content):
+                self.assert_rejected(self.write_vendor('invalid.yml', content))
+
+    def test_duplicate_and_merge_keys_cannot_hide_unsafe_settings(self):
+        for content in (
+            'network: {ethernets: {ens33: {dhcp4: true}}}\n' + DESKTOP_VENDOR,
+            'network:\n  version: 2\n  renderer: networkd\n  renderer: NetworkManager\n',
+            'network:\n  <<: {renderer: networkd}\n  renderer: NetworkManager\n  version: 2\n',
+        ):
+            with self.subTest(content=content):
+                self.assert_rejected(self.write_vendor('ambiguous.yaml', content))
+
+    def test_multiple_files_require_every_file_to_be_safe(self):
+        first = self.write_vendor('00-network-manager-all.yaml', DESKTOP_VENDOR)
+        second = self.write_vendor('99-custom.yml', DESKTOP_VENDOR)
+        self.assertEqual(nc.check_vendor_netplan(self.vendor), [first, second])
+        for path in (first, second):
+            with self.subTest(path=path):
+                path.write_text(DESKTOP_VENDOR + '  ethernets: {}\n')
+                self.assert_rejected(path)
+                path.write_text(DESKTOP_VENDOR)
+
+    @unittest.skipUnless(shutil.which('netplan'), 'Netplan parser is not installed')
+    def test_real_netplan_merges_desktop_vendor_with_static_interface(self):
+        self.write_vendor('00-network-manager-all.yaml', DESKTOP_VENDOR)
+        directory = self.root / 'etc/netplan'
+        directory.mkdir(parents=True)
+        managed = str(directory / '90-vmware-ubuntu-bootstrap-static.yaml')
+        changes = nc.netplan_changes({}, 'ens33', '02:00:00:00:00:01',
+                                     '192.168.101.254/24', '192.168.101.1',
+                                     ['192.168.101.1'], managed)
+        for name, doc in changes.items():
+            path = Path(name)
+            path.write_text(yaml.safe_dump(doc))
+            path.chmod(0o600)
+        # Read-only parsing of the isolated lib/etc tree; never generate on the host.
+        result = subprocess.run([shutil.which('netplan'), 'get', '--root-dir', str(self.root)],
+                                text=True, capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        network = yaml.safe_load(result.stdout)['network']
+        self.assertEqual(network['renderer'], 'NetworkManager')
+        nic = network['ethernets']['ens33']
+        self.assertFalse(nic['dhcp4'])
+        self.assertEqual(nic['addresses'], ['192.168.101.254/24'])
+        self.assertEqual(nic['routes'], [{'to': 'default', 'via': '192.168.101.1'}])
+        self.assertEqual(nic['nameservers']['addresses'], ['192.168.101.1'])
+
+    def test_unreadable_invalid_encoding_and_non_regular_files_fail_closed(self):
+        path = self.write_vendor('00-network-manager-all.yaml', DESKTOP_VENDOR)
+        with mock.patch.object(Path, 'read_text', side_effect=PermissionError('unreadable')):
+            self.assert_rejected(path)
+        with mock.patch.object(Path, 'iterdir', side_effect=PermissionError('unreadable')):
+            self.assert_rejected(self.vendor)
+        path.write_bytes(b'\xff\xfe')
+        self.assert_rejected(path)
+        path.unlink()
+        path.mkdir()
+        self.assert_rejected(path)
+        path.rmdir()
+        os.mkfifo(path)
+        self.assert_rejected(path)
+        path.unlink()
+        target = self.write_vendor('target.txt', DESKTOP_VENDOR)
+        path.symlink_to(target)
+        self.assert_rejected(path)
+        target.unlink()
+        self.assert_rejected(path)
+
+    def test_cli_failure_names_file_without_partial_allow_output(self):
+        self.write_vendor('00-network-manager-all.yaml', DESKTOP_VENDOR)
+        bad = self.write_vendor('99-invalid.yml', 'network: [')
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/network_config.py'),
+                                 'check-vendor', str(self.vendor)], text=True,
+                                capture_output=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(str(bad), result.stderr)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertEqual(result.stdout, '')
+
+
 NETWORK_MOCK = r'''#!/usr/bin/python3
 import json, os, pathlib, sys
 root=pathlib.Path(os.environ['NETWORK_FIXTURE'])
@@ -220,6 +371,68 @@ class NetworkPhaseTests(unittest.TestCase):
         self.assertEqual((self.root/'state/static-network.state').read_bytes(),marker)
         self.assertEqual(list((self.root/'backups').iterdir()),backups)
         self.assertEqual(self.original.stat().st_mode & 0o777,0o644)
+
+    def test_ssh_accepts_desktop_vendor_and_preserves_files(self):
+        vendor = Path(self.env['VUB_NETPLAN_LIB_DIR'])
+        vendor.mkdir()
+        paths = [vendor / '00-network-manager-all.yaml', vendor / '99-desktop.yml']
+        for path in paths:
+            path.write_text(DESKTOP_VENDOR)
+            path.chmod(0o644)
+        before = {path: (path.read_bytes(), path.stat().st_mode) for path in paths}
+        # Use an explicit output override as well as isolated directory overrides.
+        self.managed = self.netplan / '91-custom-static.yaml'
+        self.env['VUB_NETPLAN_FILE'] = str(self.managed)
+        result = self.run_phase()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for path in paths:
+            self.assertIn(f'允许仅指定 NetworkManager renderer 的 vendor Netplan 定义：{path}', result.stdout)
+        self.assertEqual({path: (path.read_bytes(), path.stat().st_mode) for path in paths}, before)
+        self.assertEqual([c for c in self.calls if c[0] == 'netplan'], [['netplan', ['generate']]])
+        self.assertEqual(self.state['addresses'], ADDRS)
+        self.assertIn('status=pending-reboot', (self.root / 'state/static-network.state').read_text())
+        self.assertTrue((self.root / 'state/reboot-required').exists())
+        nic = yaml.safe_load(self.managed.read_text())['network']['ethernets']['ens160']
+        self.assertEqual(nic['addresses'], ['192.168.50.20/24'])
+
+    def test_unsafe_vendor_blocks_before_netplan_writes(self):
+        vendor = Path(self.env['VUB_NETPLAN_LIB_DIR'])
+        vendor.mkdir()
+        safe = vendor / '00-network-manager-all.yaml'
+        safe.write_text(DESKTOP_VENDOR)
+        bad = vendor / '99-custom.yml'
+        for content in (DESKTOP_VENDOR + '  ethernets:\n    ens33:\n      dhcp4: true\n',
+                        'network: [', DESKTOP_VENDOR + 'unknown: true\n'):
+            with self.subTest(content=content):
+                bad.write_text(content)
+                original = self.original.read_bytes()
+                result = self.run_phase()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(str(bad), result.stderr)
+                self.assertNotIn('允许仅指定', result.stdout)
+                self.assertEqual(bad.read_text(), content)
+                self.assertEqual(safe.read_text(), DESKTOP_VENDOR)
+                self.assertEqual(self.original.read_bytes(), original)
+                self.assertFalse(self.managed.exists())
+                self.assertEqual(list((self.root / 'backups').iterdir()), [])
+                self.assertFalse((self.root / 'state/static-network.state').exists())
+                self.assertFalse((self.root / 'state/reboot-required').exists())
+                self.assertFalse([c for c in self.calls if c[0] == 'netplan'])
+
+    def test_runtime_yaml_is_always_rejected(self):
+        runtime = Path(self.env['VUB_NETPLAN_RUN_DIR'])
+        runtime.mkdir()
+        for suffix in ('yaml', 'yml'):
+            with self.subTest(suffix=suffix):
+                path = runtime / f'00-network-manager-all.{suffix}'
+                path.write_text(DESKTOP_VENDOR)
+                result = self.run_phase()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(str(runtime), result.stderr)
+                self.assertEqual(path.read_text(), DESKTOP_VENDOR)
+                self.assertFalse(self.managed.exists())
+                self.assertFalse([c for c in self.calls if c[0] == 'netplan'])
+                path.unlink()
 
     def test_managed_yaml_permission_gate_is_retained(self):
         self.assertEqual(self.run_phase().returncode,0)

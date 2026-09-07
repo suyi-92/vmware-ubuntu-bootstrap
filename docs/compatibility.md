@@ -52,7 +52,9 @@ ARP 使用 Ubuntu 的 `iputils-arping -D`，在所选接口执行；发现重复
 
 ARP 只能反映当时可观察的网络，不能保证离线设备、DHCP 后续分配或并发安装不冲突。必须由用户/管理员确认地址在 DHCP 动态池之外，或已做合适的地址保留；脚本不猜测地址池，不随机选址。
 
-只改所选接口的 IPv4；保留其他接口、IPv6、全局 renderer。Netplan 会合并多个文件，因此必要时备份并清理原 YAML 中同一接口的 IPv4 地址/默认路由，再写受管定义；不能仅删除一个新 YAML 来还原。共享/通配 match、多定义、策略路由/on-link、`/run/netplan` 或 `/lib/netplan` 定义等不能确认可安全修改的情况会明确拒绝，由管理员先消除歧义。不会通过改全局 renderer 绕过问题。
+只改所选接口的 IPv4；保留其他接口、IPv6、全局 renderer。Netplan 会合并多个文件，因此必要时备份并清理原 YAML 中同一接口的 IPv4 地址/默认路由，再写受管定义；不能仅删除一个新 YAML 来还原。共享/通配 match、多定义、策略路由/on-link 等不能确认可安全修改的情况会明确拒绝，由管理员先消除歧义。不会通过改全局 renderer 绕过问题。
+
+`/run/netplan` 存在任何 `.yaml` 或 `.yml` 时仍拒绝配置。`/lib/netplan` 没有 YAML 时放行；有文件时逐一用 Python/PyYAML 做语义检查，只允许顶层 `network` 中明确设置 `renderer: NetworkManager`，可选的 `version` 必须为整数 `2`。因此 Ubuntu Desktop 默认的 `00-network-manager-all.yaml` 可以保留，文件名不作为放行依据。任何接口定义、其他全局字段、未知字段、空/纯注释文档、非法 YAML、重复/合并键、符号链接或无法读取的文件都会拒绝并指出路径；多个文件必须全部通过才继续。校验只读 vendor 文件，不删除、移动或改写系统包管理的配置。
 
 `PROXY_SCAN_CIDR` 独立限制在至多 256 地址。未填写时从所选接口当前地址计算 `/24` 或更小范围；静态 `/16` 不会导致扫描整个 `/16`。UFW 来源与 NO_PROXY 使用实际管理 CIDR，并包含显式静态目标网段，不能用代理扫描范围代替 LAN 前缀。
 

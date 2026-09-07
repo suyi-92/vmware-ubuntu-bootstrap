@@ -95,6 +95,59 @@ def check_conflicts(cidr, selected, addresses, proxies):
             raise ValueError("固定 IP 不能与已知代理主机相同")
 
 
+def check_vendor_netplan(directory):
+    """Allow only unambiguous global NetworkManager defaults; never edit vendor files."""
+    import yaml
+
+    class VendorLoader(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            # SafeLoader normally overwrites duplicate keys and expands YAML merges,
+            # which could hide settings that Netplan interprets differently.
+            keys = set()
+            for key, _ in node.value:
+                if not isinstance(key, yaml.ScalarNode) or key.tag != 'tag:yaml.org,2002:str':
+                    raise ValueError("仅允许字符串配置键，不支持 YAML 合并键")
+                if key.value in keys:
+                    raise ValueError("存在重复的 YAML 配置键")
+                keys.add(key.value)
+            return super().construct_mapping(node, deep=deep)
+
+    root = pathlib.Path(directory)
+    try:
+        paths = sorted(path for path in root.iterdir() if path.name.endswith((".yaml", ".yml")))
+    except FileNotFoundError as exc:
+        if not root.is_symlink():
+            return []
+        raise ValueError(f"无法读取 vendor Netplan 目录：{root}") from exc
+    except OSError as exc:
+        raise ValueError(f"无法读取 vendor Netplan 目录：{root}") from exc
+
+    for path in paths:
+        try:
+            if path.is_symlink() or not path.is_file():
+                raise ValueError("拒绝符号链接或非普通文件")
+            try:
+                doc = yaml.load(path.read_text(encoding="utf-8"), Loader=VendorLoader)
+            except yaml.YAMLError as exc:
+                raise ValueError("YAML 无法安全解析") from exc
+            if not isinstance(doc, dict) or set(doc) != {"network"}:
+                raise ValueError("顶层必须仅包含 network 映射；空文档或未知配置不放行")
+            network = doc["network"]
+            if not isinstance(network, dict):
+                raise ValueError("network 必须是映射")
+            if set(network) - {"version", "renderer"}:
+                raise ValueError("包含会影响具体网络配置的字段；仅允许全局 renderer/version")
+            if network.get("renderer") != "NetworkManager":
+                raise ValueError("必须明确指定 renderer: NetworkManager")
+            if "version" in network and (type(network["version"]) is not int or network["version"] != 2):
+                raise ValueError("version 必须是整数 2")
+        except (ValueError, OSError) as exc:
+            reason = "无法读取 UTF-8 YAML 文件" if isinstance(exc, (OSError, UnicodeError)) else str(exc)
+            raise ValueError(f"无法安全放行 vendor Netplan 定义：{path}（{reason}）；"
+                             "请管理员确认并整合后再配置静态网络。") from exc
+    return paths
+
+
 def netplan_changes(documents, selected, mac, cidr, gateway, dns, managed):
     """Change only selected Ethernet IPv4 fields; retain renderer/IPv6/other NICs."""
     docs = copy.deepcopy(documents)
@@ -150,6 +203,9 @@ def main():
         print(item["interface"], " ".join(item["cidrs"]), item["gateway"], item["mac"], sep="\n")
     elif action == "conflicts":
         check_conflicts(args[0], args[1], ip_json("-4", "addr", "show"), args[2:])
+    elif action == "check-vendor":
+        for path in check_vendor_netplan(*args):
+            print(path)
     elif action == "plan":
         import yaml
         directory, managed_name, selected, mac, cidr, gateway, dns, output = args

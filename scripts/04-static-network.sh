@@ -30,12 +30,17 @@ require_command netplan
 
 NETPLAN_DIR="${VUB_NETPLAN_DIR:-/etc/netplan}"
 NETPLAN_FILE="${VUB_NETPLAN_FILE:-$NETPLAN_DIR/90-vmware-ubuntu-bootstrap-static.yaml}"
-# Runtime/vendor definitions cannot safely be rewritten persistently here.
-for extra_dir in "${VUB_NETPLAN_RUN_DIR:-/run/netplan}" "${VUB_NETPLAN_LIB_DIR:-/lib/netplan}"; do
-  if compgen -G "$extra_dir/*.yaml" >/dev/null || compgen -G "$extra_dir/*.yml" >/dev/null; then
-    die "发现 $extra_dir 中的 Netplan 定义；请管理员整合到 /etc/netplan 后再配置静态网络。"
-  fi
-done
+# Runtime definitions retain the strict gate; vendor defaults need semantic checks.
+NETPLAN_RUN_DIR="${VUB_NETPLAN_RUN_DIR:-/run/netplan}"
+if compgen -G "$NETPLAN_RUN_DIR/*.yaml" >/dev/null || compgen -G "$NETPLAN_RUN_DIR/*.yml" >/dev/null; then
+  die "发现 $NETPLAN_RUN_DIR 中的 Netplan 定义；请管理员整合到 /etc/netplan 后再配置静态网络。"
+fi
+VENDOR_NETPLAN_FILES=$(python3 "$SCRIPT_DIR/network_config.py" check-vendor "${VUB_NETPLAN_LIB_DIR:-/lib/netplan}") \
+  || die "vendor Netplan 安全检查失败。"
+while IFS= read -r vendor_file; do
+  [[ -n "$vendor_file" ]] || continue
+  info "允许仅指定 NetworkManager renderer 的 vendor Netplan 定义：$vendor_file"
+done <<<"$VENDOR_NETPLAN_FILES"
 
 PLAN_DIR=$(mktemp -d)
 NETWORK_COMMITTED=false
