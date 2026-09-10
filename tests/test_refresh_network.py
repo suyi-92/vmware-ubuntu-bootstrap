@@ -26,7 +26,7 @@ class RefreshNetworkTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         (self.base / "scripts").mkdir()
         (self.base / "bin").mkdir()
-        for name in ("00-lib.sh", "network-lib.sh", "network_config.py", "docker-local.sh"):
+        for name in ("00-lib.sh", "network-lib.sh", "network_config.py", "docker-local.sh", "network_health.py"):
             shutil.copy2(ROOT / "scripts" / name, self.base / "scripts" / name)
         shutil.copy2(ROOT / "refresh-network.sh", self.base / "refresh-network.sh")
         self.config = self.base / "config.env"
@@ -99,6 +99,16 @@ else
   printf 'ufw %s\n' "$*" >>"$FIXTURE/events"
 fi
 """)
+        self.write_executable("bin/getent", """#!/bin/bash
+if [[ "$1" == ahostsv4 ]]; then
+  printf 'dns %s\\n' "$2" >>"$FIXTURE/events"
+  [[ "${FAIL_DNS:-0}" == 0 ]] || exit 2
+  echo '192.0.2.1 STREAM fixture.example'
+else
+  exec /usr/bin/getent "$@"
+fi
+""")
+        self.write_executable("bin/systemctl", "#!/bin/bash\nexit 3\n")
 
     def write_executable(self, name, content):
         path = self.base / name
@@ -210,6 +220,19 @@ fi
         self.assertEqual(result.returncode, 7)
         self.assertNotIn("ufw ", self.events())
         self.assertNotIn("刷新完成", result.stdout)
+
+    def test_dns_failure_after_proxy_never_claims_full_recovery(self):
+        result = self.run_refresh(FAIL_DNS="1", UFW_STATUS="active")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("proxy ", self.events())
+        self.assertIn("系统 DNS 验证失败", result.stdout)
+        self.assertNotIn("刷新完成", result.stdout)
+        self.assertNotIn("ufw ", self.events())
+
+    def test_dry_run_does_not_run_final_dns_acceptance(self):
+        result = self.run_refresh("--dry-run", FAIL_DNS="1")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("dns ", self.events())
 
 
 if __name__ == "__main__":

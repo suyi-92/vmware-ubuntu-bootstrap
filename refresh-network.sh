@@ -24,6 +24,7 @@ usage() {
   -h, --help           显示帮助
 
 代理刷新会更新本项目管理的 Shell/APT/Git/systemd/Docker/Snap 和 GNOME 桌面配置。
+同时同步用户服务的代理环境，并单独验证本机 DNS；DNS 失败不会误报网络已恢复。
 代理发生变化时会重启正在运行的 Docker；已运行的其他程序需重新启动。
 EOF
 }
@@ -151,6 +152,12 @@ export VUB_REFRESH_INTERFACE="$NETWORK_INTERFACE" VUB_FORCE_PROXY_HOST="$SELECTE
 export VUB_REFRESH_PROXY_PORT="$PROXY_PORT"
 # Do not install dependencies through a possibly stale proxy during recovery.
 bash "$PROJECT_DIR/bootstrap.sh" --phase proxy-refresh --config "$VUB_CONFIG_FILE"
+
+# A proxy resolves remote hostnames itself and can mask broken host DNS routing.
+# Do not remove another VPN's DNS policy automatically to make this check pass.
+if ! is_dry_run; then
+  python3 "$PROJECT_DIR/scripts/network_health.py" --interface "$NETWORK_INTERFACE"
+fi
 
 # Refresh only the LAN SSH allowance; do not reinstall SSH or change its keys/settings.
 if command -v ufw >/dev/null 2>&1 && LC_ALL=C ufw status | grep -q '^Status: active'; then

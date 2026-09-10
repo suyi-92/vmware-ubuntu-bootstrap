@@ -8,6 +8,7 @@
 - 软件包安装本身不可通用回滚；`packages` 回滚会恢复受管 APT 源、密钥、hostname 和时间配置，但不会降级或卸载已经更新的软件包，同来源升级不会自动换源；已有 Docker 源与数据不属于自动卸载/迁移对象。
 - `input-method` 会快照 `.xinputrc`、Fcitx5 配置和完整 Rime 用户目录；首次接管非空目录时还会留下用户可直接读取的 `rime.bak.YYYYmmdd-HHMMSS` 副本。回滚不卸载 APT 包，也不回退作为下载缓存的 `~/plum` Git 工作树。
 - `sudo-policy` 回滚会恢复执行前的受管 sudoers 文件；关闭免密 sudo 也只移除本项目管理的规则。
+- 代理阶段保存 GNOME 代理键及 systemd 用户会话的代理变量；回滚同时恢复运行中的会话激活环境。`proxy-off` 对两组状态分别核对，保留外部修改。D-Bus 中原来未设置的代理恢复为空值，systemd 中恢复为未设置；已经运行的程序仍需自行重新启动。
 
 ## 查看备份
 

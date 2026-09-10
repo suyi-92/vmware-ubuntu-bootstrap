@@ -7,7 +7,7 @@
 ## 1. 主要功能
 
 - 自动扫描当前局域网内可用的 `7890` HTTP/Mixed 代理。
-- 为普通用户、root、sudo、APT、Git、Docker、Snap、GNOME 桌面，以及遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 的命令和 systemd 服务配置代理；Firefox 等浏览器选择“使用系统代理设置”。
+- 为普通用户、root、sudo、APT、Git、Docker、Snap、GNOME 桌面，以及遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 的命令和 systemd 服务配置代理；同时同步 D-Bus/systemd 用户会话环境。Firefox 等浏览器选择“使用系统代理设置”。
 - 默认保持现有网络，显示管理网卡、IPv4/CIDR、网关和 MAC；静态 IPv4 需明确启用，应用前使用 ARP 检测冲突。
 - 关闭 GNOME 息屏、锁屏、自动挂起，以及系统休眠相关 target。
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。

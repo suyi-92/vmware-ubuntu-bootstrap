@@ -25,6 +25,12 @@ desktop_proxy_settings() {
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" gsettings "$@"
 }
 
+desktop_proxy_session() {
+  runuser -u "$REAL_USER" -- env HOME="$REAL_HOME" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$REAL_UID/bus" \
+    python3 "$VUB_PROJECT_DIR/scripts/session_proxy.py" "$@"
+}
+
 desktop_proxy_snapshot() {
   local schema key value
   while read -r schema key; do
@@ -43,12 +49,56 @@ desktop_proxy_restore() {
 }
 
 desktop_proxy_begin_change() {
+  local settings session
   init_backup_dir
   if [[ ! -e "$VUB_BACKUP_DIR/desktop-proxy.before.tsv" ]]; then
-    desktop_proxy_snapshot >"$VUB_BACKUP_DIR/desktop-proxy.before.tsv" || return 1
-    chmod 0600 "$VUB_BACKUP_DIR/desktop-proxy.before.tsv"
+    settings=$(desktop_proxy_snapshot) || return 1
+    session=$(desktop_proxy_session snapshot) || return 1
     printf '%s\n' "$REAL_UID" >"$VUB_BACKUP_DIR/desktop-proxy.uid"
+    printf '%s\n' "$settings" >"$VUB_BACKUP_DIR/desktop-proxy.before.tsv"
+    printf '%s\n' "$session" >"$VUB_BACKUP_DIR/session-proxy.before.json"
+    chmod 0600 "$VUB_BACKUP_DIR/desktop-proxy.before.tsv"
+    chmod 0600 "$VUB_BACKUP_DIR/session-proxy.before.json"
   fi
+}
+
+desktop_proxy_session_apply() {
+  local proxy="$1" bypass="$2" desired previous managed
+  previous="$VUB_STATE_DIR/session-proxy-$REAL_UID.previous.json"
+  managed="$VUB_STATE_DIR/session-proxy-$REAL_UID.managed.json"
+  if [[ ! -e "$previous" ]]; then
+    write_managed_file "$previous" 0600 root root <"$VUB_BACKUP_DIR/session-proxy.before.json"
+  fi
+  desired=$(mktemp)
+  python3 - "$proxy" "$bypass" >"$desired" <<'PY'
+import json, sys
+values = {}
+for key in ('http_proxy', 'https_proxy', 'all_proxy', 'no_proxy'):
+    values[key] = values[key.upper()] = sys.argv[2] if key == 'no_proxy' else sys.argv[1]
+print(json.dumps(values, sort_keys=True))
+PY
+  if ! desktop_proxy_session restore <"$desired"; then
+    rm -f "$desired"
+    die "用户会话代理环境同步失败。"
+  fi
+  rm -f "$desired"
+  desktop_proxy_session snapshot | write_managed_file "$managed" 0600 root root
+  info "已同步 D-Bus 与 systemd 用户会话代理；新启动的用户服务使用新地址。"
+}
+
+desktop_proxy_session_disable() {
+  local previous="$VUB_STATE_DIR/session-proxy-$REAL_UID.previous.json"
+  local managed="$VUB_STATE_DIR/session-proxy-$REAL_UID.managed.json" current
+  [[ -f "$previous" && -f "$managed" ]] || return 0
+  current=$(desktop_proxy_session snapshot) || return 1
+  if [[ "$current" != "$(cat "$managed")" ]]; then
+    warn "用户会话代理环境已被外部修改，保留当前值及原始备份。"
+    return 0
+  fi
+  desktop_proxy_begin_change || return 1
+  desktop_proxy_session restore <"$previous" || die "无法恢复用户会话代理环境。"
+  remove_managed_path "$previous"
+  remove_managed_path "$managed"
 }
 
 desktop_proxy_apply() {
@@ -62,7 +112,7 @@ desktop_proxy_apply() {
       || die "桌面代理设置不可写：$schema $key。"
   done < <(desktop_proxy_keys)
   if is_dry_run; then
-    info "DRY-RUN: 将为 $REAL_USER 更新 GNOME HTTP/HTTPS 代理为 $host:$port。"
+    info "DRY-RUN: 将为 $REAL_USER 更新 GNOME 及 D-Bus/systemd 用户会话代理为 $host:$port。"
     return 0
   fi
   ignored=$(python3 - "$bypass" <<'PY'
@@ -103,6 +153,7 @@ PY
     && "$(desktop_proxy_settings get org.gnome.system.proxy.https port)" == "$port" ]] \
     || die "GNOME 桌面代理复验失败。"
   info "GNOME 桌面代理已更新：$host:$port；Firefox 等浏览器请选择使用系统代理。"
+  desktop_proxy_session_apply "http://$host:$port" "$bypass"
 }
 
 desktop_proxy_disable() {
@@ -114,6 +165,7 @@ desktop_proxy_disable() {
     info "DRY-RUN: 将恢复 $REAL_USER 原来的 GNOME 桌面代理。"
     return 0
   fi
+  desktop_proxy_session_disable
   current=$(desktop_proxy_snapshot) || return 1
   if [[ "$current" != "$(cat "$managed")" ]]; then
     warn "桌面代理已被外部修改，保留用户当前设置及原始备份。"
@@ -138,4 +190,8 @@ desktop_proxy_rollback() {
   desktop_proxy_begin_change || return 1
   desktop_proxy_restore "$source_backup/desktop-proxy.before.tsv" \
     || die "桌面代理回滚失败。"
+  if [[ -f "$source_backup/session-proxy.before.json" ]]; then
+    desktop_proxy_session restore <"$source_backup/session-proxy.before.json" \
+      || die "用户会话代理环境回滚失败。"
+  fi
 }
