@@ -14,7 +14,7 @@ usage() {
   sudo bash bootstrap.sh --phase <phase> [--config config.env] [--dry-run] [--yes] [--verbose]
 
 阶段：
-  full, dependencies, preflight, proxy, proxy-status, proxy-off, packages,
+  full, dependencies, preflight, proxy, proxy-refresh, proxy-status, proxy-off, packages,
   input-method, sudo-policy, static-network, power, ssh, codex, validate,
   status, rollback
 EOF
@@ -53,7 +53,7 @@ phase_script() {
   case "$1" in
     dependencies) printf '%s\n' "$PROJECT_DIR/scripts/00-dependencies.sh" ;;
     preflight) printf '%s\n' "$PROJECT_DIR/scripts/01-preflight.sh" ;;
-    proxy|proxy-status|proxy-off) printf '%s\n' "$PROJECT_DIR/scripts/02-proxy.sh" ;;
+    proxy|proxy-refresh|proxy-status|proxy-off) printf '%s\n' "$PROJECT_DIR/scripts/02-proxy.sh" ;;
     packages) printf '%s\n' "$PROJECT_DIR/scripts/03-packages.sh" ;;
     input-method) printf '%s\n' "$PROJECT_DIR/scripts/04-input-method.sh" ;;
     sudo-policy) printf '%s\n' "$PROJECT_DIR/scripts/03-sudo-policy.sh" ;;
@@ -83,8 +83,12 @@ ensure_startup_dependencies() {
 run_one_phase() {
   local phase="$1" script action=""
   script="$(phase_script "$phase")" || die "未知阶段：$phase"
+  if [[ "$phase" == proxy-refresh && -e "$VUB_STATE_DIR/active-backup" ]]; then
+    die "有未完成的配置备份：$VUB_STATE_DIR/active-backup；请先按 docs/recovery.md 完成恢复。"
+  fi
   case "$phase" in
     proxy) action="apply" ;;
+    proxy-refresh) action="refresh" ;;
     proxy-status) action="status" ;;
     proxy-off) action="off" ;;
   esac
@@ -108,10 +112,17 @@ handle_phase_failure() {
   export VUB_PHASE_NAME
   if [[ "$phase" != static-network ]]; then mark_phase failed "phase command failed" || true; fi
   case "$phase" in
-    proxy|proxy-off|packages|input-method|sudo-policy|static-network|power|ssh|codex)
+    proxy|proxy-refresh|proxy-off|packages|input-method|sudo-policy|static-network|power|ssh|codex)
       if [[ -r "$VUB_STATE_DIR/active-backup" && -f "$PROJECT_DIR/scripts/10-rollback.sh" ]]; then
-        local active
+        local active active_phase
         active="$(<"$VUB_STATE_DIR/active-backup")"
+        if [[ "$phase" == proxy-refresh ]]; then
+          active_phase=$(sed -nE 's/^phase=(.*)$/\1/p' "$active/MANIFEST.txt" 2>/dev/null | head -n1)
+          if [[ "$active_phase" != proxy ]]; then
+            warn "活动备份不属于本次代理阶段，未自动回滚：$active"
+            return 1
+          fi
+        fi
         warn "尝试回滚当前阶段备份：$active"
         VUB_PHASE_NAME="rollback" bash "$PROJECT_DIR/scripts/10-rollback.sh" --backup "$active" --automatic || \
           warn "自动回滚未完整成功，请按 recovery 文档处理。"
@@ -146,7 +157,7 @@ case "$PHASE" in
       exit 1
     fi
     ;;
-  proxy-status|proxy-off|validate|status|rollback)
+  proxy-refresh|proxy-status|proxy-off|validate|status|rollback)
     if ! run_one_phase "$PHASE"; then
       handle_phase_failure "$PHASE"
       exit 1

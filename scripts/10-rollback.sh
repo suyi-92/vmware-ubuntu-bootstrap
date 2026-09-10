@@ -4,6 +4,8 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
+# shellcheck source=desktop-proxy.sh
+source "$SCRIPT_DIR/desktop-proxy.sh"
 
 BACKUP_REF="last"
 AUTOMATIC="false"
@@ -154,6 +156,9 @@ if ! is_dry_run; then
         netplan apply
       fi
       ;;
+    network-refresh-ssh)
+      ufw reload
+      ;;
     ssh)
       sshd_bin="${VUB_SSHD_BIN:-/usr/sbin/sshd}"
       "$sshd_bin" -t
@@ -174,6 +179,7 @@ if ! is_dry_run; then
   esac
 fi
 
+desktop_proxy_rollback "$SOURCE_BACKUP"
 complete_backup
 mark_phase complete "restored=$(basename "$SOURCE_BACKUP")"
 info "回滚完成：$(basename "$SOURCE_BACKUP")；安全快照已保留，可再次回退。"

@@ -4,18 +4,33 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
+# shellcheck source=desktop-proxy.sh
+source "$SCRIPT_DIR/desktop-proxy.sh"
 
 ACTION="${1:-apply}"
 require_root
 load_config false
 resolve_real_user
+if [[ "$ACTION" == "refresh" ]]; then
+  # Installation inputs may still describe the host and LAN before a Wi-Fi change.
+  NETWORK_INTERFACE="${VUB_REFRESH_INTERFACE:-${NETWORK_INTERFACE:-}}"
+  NETWORK_INTERFACE=$(current_interface) || die "无法确定管理网卡；请使用 refresh-network.sh --interface <网卡>。"
+  PROXY_HOST="${VUB_FORCE_PROXY_HOST:-}"
+  PROXY_PORT="${VUB_REFRESH_PROXY_PORT:-$PROXY_PORT}"
+  PROXY_SCAN_CIDR=$(default_proxy_scan_cidr "$NETWORK_INTERFACE") \
+    || die "没有唯一可用 IPv4；请在 VMware 控制台运行 refresh-network.sh --renew。"
+  GATEWAY_IPV4=$(current_gateway "$NETWORK_INTERFACE")
+  [[ -n "$GATEWAY_IPV4" ]] || die "管理网卡没有默认网关；请先恢复 DHCP 或 VMware 桥接。"
+  # NO_PROXY must reflect the live LAN, not an old or pending static target.
+  export CONFIGURE_STATIC_NETWORK=false
+fi
 validate_port PROXY_PORT
 if [[ -n "${PROXY_HOST:-}" ]]; then
   [[ "$PROXY_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ]] \
     || die "PROXY_HOST 不合法：$PROXY_HOST"
 fi
 if [[ "$ACTION" != "status" ]]; then
-  if [[ "$ACTION" == "apply" ]]; then
+  if [[ "$ACTION" == "apply" || "$ACTION" == "refresh" ]]; then
     start_phase "proxy"
   else
     start_phase "proxy-${ACTION}"
@@ -32,19 +47,51 @@ GIT_PROXY_FILE="$VUB_ETC_DIR/git-proxy.conf"
 DOCKER_DAEMON_FILE="/etc/systemd/system/docker.service.d/90-vmware-ubuntu-bootstrap-proxy.conf"
 DOCKER_PATHS_FILE="$VUB_STATE_DIR/docker-proxy-paths"
 
+proxy_probe() {
+  local proxy="$1" label="$2" url="$3" accepted="$4"
+  local attempt output http_code connect_code curl_status error_file details retryable
+  error_file=$(mktemp)
+  for attempt in 1 2; do
+    curl_status=0
+    # connect-timeout covers the proxy CONNECT and TLS handshake as well as TCP.
+    # A cold proxy route can take longer than the original three-second limit.
+    output=$(curl -sS -o /dev/null -w '%{http_code} %{http_connect}' \
+      --proxy "$proxy" --noproxy '' --connect-timeout 8 --max-time 20 \
+      "$url" 2>"$error_file") || curl_status=$?
+    read -r http_code connect_code <<<"$output"
+    if (( curl_status == 0 )) && [[ " $accepted " == *" $http_code "* ]]; then
+      rm -f -- "$error_file"
+      return 0
+    fi
+    details=$(tr '\r\n' '  ' <"$error_file" | cut -c1-500)
+    warn "$label 验证失败：代理=$proxy；HTTP=${http_code:-000}；CONNECT=${connect_code:-000}；curl=$curl_status${details:+；$details}" >&2
+    retryable=false
+    case "$curl_status" in
+      5|6|7|18|28|35|52|55|56) retryable=true ;;
+      0)
+        case "$http_code" in 408|429|500|502|503|504) retryable=true ;; esac
+        ;;
+    esac
+    if (( attempt == 1 )) && is_true "$retryable"; then
+      info "$label 遇到暂时性请求失败，1 秒后重试一次。" >&2
+      sleep 1
+    else
+      break
+    fi
+  done
+  rm -f -- "$error_file"
+  return 1
+}
+
 proxy_test() {
-  local host="$1" port="$2" proxy registry_code github_code
-  proxy="http://${host}:${port}"
-  registry_code="$(curl -sS -o /dev/null -w '%{http_code}' --proxy "$proxy" \
-    --connect-timeout 3 --max-time 10 https://registry-1.docker.io/v2/ 2>/dev/null || true)"
-  [[ "$registry_code" == "200" || "$registry_code" == "401" ]] || return 1
-  github_code="$(curl -sS -o /dev/null -w '%{http_code}' --proxy "$proxy" \
-    --connect-timeout 3 --max-time 10 https://github.com/ 2>/dev/null || true)"
-  [[ "$github_code" == "200" || "$github_code" == "301" || "$github_code" == "302" ]]
+  local proxy="http://${1}:${2}"
+  proxy_probe "$proxy" 'Docker Registry' https://registry-1.docker.io/v2/ '200 401' || return 1
+  proxy_probe "$proxy" 'GitHub' https://github.com/ '200 301 302'
 }
 
 choose_verified_proxy() {
-  local iface self_ip cidr host configured_host
+  local iface self_ip cidr host configured_host candidates
+  local -a open_hosts=()
   iface="${NETWORK_INTERFACE:-$(current_interface)}"
   self_ip="$(current_ipv4 "$iface")"
   [[ -n "$self_ip" ]] || die "无法确定 Ubuntu IPv4。"
@@ -59,8 +106,9 @@ choose_verified_proxy() {
   fi
 
   info "在 $cidr 扫描 TCP $PROXY_PORT ..." >&2
-  mapfile -t open_hosts < <(python3 "$SCRIPT_DIR/proxy_scan.py" \
-    --cidr "$cidr" --self-ip "$self_ip" --port "$PROXY_PORT")
+  candidates=$(python3 "$SCRIPT_DIR/proxy_scan.py" \
+    --cidr "$cidr" --self-ip "$self_ip" --port "$PROXY_PORT") || die "代理扫描失败。"
+  mapfile -t open_hosts <<<"$candidates"
   local -a verified=()
   for host in "${open_hosts[@]:-}"; do
     [[ -n "$host" ]] || continue
@@ -69,7 +117,7 @@ choose_verified_proxy() {
   done
 
   case "${#verified[@]}" in
-    0) die "没有找到可用代理；请检查 Allow LAN、7890 监听和 Windows 防火墙。" ;;
+    0) die "没有找到可用代理；请查看上方 Docker Registry / GitHub 的具体验证错误。" ;;
     1) printf '%s\n' "${verified[0]}" ;;
     *)
       warn "发现多个可用代理：${verified[*]}"
@@ -354,6 +402,7 @@ apply_proxy() {
   fi
 
   if is_dry_run; then
+    desktop_proxy_apply "$host" "$PROXY_PORT" "$no_proxy_value"
     complete_backup
     mark_phase planned "proxy=$proxy_url"
     info "DRY-RUN: 代理配置计划完成。"
@@ -382,6 +431,7 @@ apply_proxy() {
       || die "用户 Docker client 代理复验失败。"
   fi
 
+  desktop_proxy_apply "$host" "$PROXY_PORT" "$no_proxy_value"
   complete_backup
   mark_phase complete "proxy=$proxy_url"
   info "代理配置完成。重新登录后所有登录环境生效。"
@@ -417,6 +467,7 @@ disable_proxy() {
   if load_proxy_state; then
     managed_proxy="${http_proxy:-}"
   fi
+  desktop_proxy_disable
 
   if grep -Fxq "$ENV_BEGIN" /etc/environment 2>/dev/null; then
     remove_marked_block /etc/environment "$ENV_BEGIN" "$ENV_END" 0644
@@ -477,7 +528,7 @@ disable_proxy() {
 }
 
 case "$ACTION" in
-  apply) apply_proxy ;;
+  apply|refresh) apply_proxy ;;
   status) show_status ;;
   off) disable_proxy ;;
   *) die "未知 proxy 操作：$ACTION" ;;

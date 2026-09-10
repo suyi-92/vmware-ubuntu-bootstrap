@@ -7,7 +7,7 @@
 ## 1. 主要功能
 
 - 自动扫描当前局域网内可用的 `7890` HTTP/Mixed 代理。
-- 为普通用户、root、sudo、APT、Git、Docker、Snap，以及遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 的命令和 systemd 服务配置代理。
+- 为普通用户、root、sudo、APT、Git、Docker、Snap、GNOME 桌面，以及遵循 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 的命令和 systemd 服务配置代理；Firefox 等浏览器选择“使用系统代理设置”。
 - 默认保持现有网络，显示管理网卡、IPv4/CIDR、网关和 MAC；静态 IPv4 需明确启用，应用前使用 ARP 检测冲突。
 - 关闭 GNOME 息屏、锁屏、自动挂起，以及系统休眠相关 target。
 - 安装并配置 OpenSSH Server、公钥登录、自定义端口和可选 UFW。
@@ -223,6 +223,15 @@ SSH 安装写入固定网络后状态为 `configured-pending-reboot`；重启同
 ## 9. 常用命令
 
 ```bash
+# 宿主机切换 Wi-Fi 后：按当前网段重新发现并配置代理
+sudo bash refresh-network.sh
+
+# Ubuntu 仍保留旧租约：在 VMware 控制台重连 DHCP 后刷新
+sudo bash refresh-network.sh --renew
+
+# 让当前终端立即使用新代理
+source /etc/profile.d/90-vmware-ubuntu-bootstrap-proxy.sh
+
 # 完整交互安装
 sudo bash install.sh
 
@@ -232,6 +241,9 @@ sudo bash install.sh --phase proxy-status
 
 # 重新检测并配置代理
 sudo bash install.sh --phase proxy
+
+# 忽略安装时保存的旧代理地址/扫描网段，仅执行代理刷新阶段
+sudo bash install.sh --phase proxy-refresh
 
 # 关闭本项目管理的代理
 sudo bash install.sh --phase proxy-off

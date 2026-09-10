@@ -34,4 +34,9 @@ jobs:
         run: sudo bash tests/test_preflight_dry_run.sh
 
       - name: Verify static network defers safely over SSH
-        run: sudo bash tests/test_static_network_ssh_deferred.sh
+        run: sudo bash tests/test_static_network_ssh_staged.sh
+
+      - name: Verify network refresh and recovery as root
+        run: |
+          sudo python3 -m unittest discover -s tests -p 'test_refresh_network.py' -v
+          sudo bash tests/test_refresh_recovery.sh
