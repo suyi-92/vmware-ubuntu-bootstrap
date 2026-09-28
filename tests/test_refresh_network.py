@@ -26,7 +26,7 @@ class RefreshNetworkTests(unittest.TestCase):
         self.base = Path(self.tmp.name)
         (self.base / "scripts").mkdir()
         (self.base / "bin").mkdir()
-        for name in ("00-lib.sh", "network-lib.sh", "network_config.py", "docker-local.sh", "network_health.py"):
+        for name in ("00-lib.sh", "network-lib.sh", "network_config.py", "docker-local.sh", "network_health.py", "failure-diagnostics.sh"):
             shutil.copy2(ROOT / "scripts" / name, self.base / "scripts" / name)
         shutil.copy2(ROOT / "refresh-network.sh", self.base / "refresh-network.sh")
         self.config = self.base / "config.env"
@@ -218,8 +218,64 @@ fi
     def test_proxy_failure_stops_before_ufw(self):
         result = self.run_refresh(FAIL_PROXY="7", UFW_STATUS="active")
         self.assertEqual(result.returncode, 7)
+        self.assertIn("退出码=7", result.stdout)
+        self.assertIn("失败阶段=执行代理刷新子脚本", result.stdout)
         self.assertNotIn("ufw ", self.events())
         self.assertNotIn("刷新完成", result.stdout)
+
+    def test_config_failure_reports_location_and_stack_without_secrets(self):
+        with self.config.open("a") as config:
+            config.write("\nsecret_function() { local token=do-not-print-this-secret; return 23; }\nsecret_function\n")
+        result = self.run_refresh("--dry-run")
+        self.assertEqual(result.returncode, 23, result.stdout)
+        self.assertIn("refresh-network 启动", result.stdout)
+        self.assertIn("失败阶段=读取配置", result.stdout)
+        self.assertIn("退出码=23", result.stdout)
+        self.assertIn("config.env:", result.stdout)
+        self.assertIn("load_config", result.stdout)
+        self.assertNotIn("do-not-print-this-secret", result.stdout)
+        self.assertEqual(self.events(), "")
+
+    def test_real_bootstrap_keeps_nested_child_failure_status(self):
+        shutil.copy2(ROOT / "bootstrap.sh", self.base / "bootstrap.sh")
+        self.write_executable("scripts/02-proxy.sh", "#!/bin/bash\nexit 37\n")
+        result = self.run_refresh("--dry-run", UFW_STATUS="active")
+        self.assertEqual(result.returncode, 37, result.stdout)
+        self.assertIn("失败阶段=bootstrap/proxy-refresh", result.stdout)
+        self.assertIn("失败阶段=执行代理刷新子脚本", result.stdout)
+        self.assertIn("退出码=37", result.stdout)
+        self.assertNotIn("ufw ", self.events())
+        self.assertFalse((self.base / "state").exists())
+
+    def test_nounset_and_explicit_exit_report_failure(self):
+        original = self.config.read_text()
+        for statement, status in (("exit 29", 29), (": \"$VUB_MISSING_TEST_VARIABLE\"", 1)):
+            with self.subTest(statement=statement):
+                self.config.write_text(original + "\n" + statement + "\n")
+                result = self.run_refresh("--dry-run")
+                self.assertEqual(result.returncode, status, result.stdout)
+                self.assertIn("失败阶段=读取配置", result.stdout)
+                self.assertIn(f"退出码={status}", result.stdout)
+                self.assertEqual(self.events(), "")
+
+    def test_user_resolution_failure_reports_original_pipeline_status(self):
+        self.write_executable("bin/getent", '''#!/bin/bash
+if [[ "$1" == group ]]; then exit 19; fi
+exec /usr/bin/getent "$@"
+''')
+        result = self.run_refresh("--dry-run")
+        self.assertEqual(result.returncode, 19, result.stdout)
+        self.assertIn("失败阶段=识别目标用户", result.stdout)
+        self.assertIn("resolve_real_user", result.stdout)
+        self.assertEqual(self.events(), "")
+
+    def test_command_substitution_does_not_swallow_early_failure(self):
+        with self.config.open("a") as config:
+            config.write("\nVALUE=$(false; printf should-not-continue)\n")
+        result = self.run_refresh("--dry-run")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("失败阶段=读取配置", result.stdout)
+        self.assertEqual(self.events(), "")
 
     def test_dns_failure_after_proxy_never_claims_full_recovery(self):
         result = self.run_refresh(FAIL_DNS="1", UFW_STATUS="active")
@@ -233,6 +289,16 @@ fi
         result = self.run_refresh("--dry-run", FAIL_DNS="1")
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertNotIn("dns ", self.events())
+
+    def test_dry_run_does_not_append_existing_system_log(self):
+        log_dir = self.base / "log"
+        log_dir.mkdir()
+        log = log_dir / "existing.log"
+        log.write_text("previous log\n")
+        result = self.run_refresh("--dry-run", VUB_LOG_FILE=str(log))
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(log.read_text(), "previous log\n")
+        self.assertEqual(list(log_dir.iterdir()), [log])
 
 
 if __name__ == "__main__":

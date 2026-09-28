@@ -83,6 +83,7 @@ with tempfile.TemporaryDirectory(prefix='vub-refresh-recovery-') as temporary:
         (base / 'config.env').write_text('# isolated fixture\n')
         (base / 'scripts' / '00-lib.sh').write_text(library)
         shutil.copyfile(project / 'scripts' / 'desktop-proxy.sh', base / 'scripts' / 'desktop-proxy.sh')
+        shutil.copyfile(project / 'scripts' / 'failure-diagnostics.sh', base / 'scripts' / 'failure-diagnostics.sh')
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(('VUB_', 'TEST_'))}
         environment.update(FIXTURE=str(base), PATH=f'{base / "bin"}:/usr/bin:/bin')
@@ -116,6 +117,10 @@ with tempfile.TemporaryDirectory(prefix='vub-refresh-recovery-') as temporary:
                      base, environment, TEST_CREATED_PHASE=created_phase, TEST_PROXY_EXIT=str(code))
         output = result.stdout + result.stderr
         assert result.returncode != 0 if existing_phase or code else result.returncode == 0, (name, output)
+        if not existing_phase:
+            assert result.returncode == code, (name, result.returncode, output)
+            if code:
+                assert f'退出码={code}' in output, output
         actual = events(base)
         if existing_phase:
             assert actual == [], (name, actual, output)

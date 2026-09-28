@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=failure-diagnostics.sh
+source "$SCRIPT_DIR/failure-diagnostics.sh"
+vub_stage 'proxy 启动/加载公共库'
 # shellcheck source=00-lib.sh
 source "$SCRIPT_DIR/00-lib.sh"
 # shellcheck source=desktop-proxy.sh
@@ -9,8 +12,11 @@ source "$SCRIPT_DIR/desktop-proxy.sh"
 
 ACTION="${1:-apply}"
 require_root
+vub_stage 'proxy/读取配置'
 load_config false
+vub_stage 'proxy/识别目标用户'
 resolve_real_user
+vub_stage 'proxy/读取网络与校验参数'
 if [[ "$ACTION" == "refresh" ]]; then
   # Installation inputs may still describe the host and LAN before a Wi-Fi change.
   NETWORK_INTERFACE="${VUB_REFRESH_INTERFACE:-${NETWORK_INTERFACE:-}}"
@@ -80,12 +86,13 @@ proxy_probe() {
     fi
   done
   rm -f -- "$error_file"
+  if (( curl_status != 0 )); then return "$curl_status"; fi
   return 1
 }
 
 proxy_test() {
   local proxy="http://${1}:${2}"
-  proxy_probe "$proxy" 'Docker Registry' https://registry-1.docker.io/v2/ '200 401' || return 1
+  proxy_probe "$proxy" 'Docker Registry' https://registry-1.docker.io/v2/ '200 401' || return $?
   proxy_probe "$proxy" 'GitHub' https://github.com/ '200 301 302'
 }
 
@@ -100,14 +107,22 @@ choose_verified_proxy() {
   configured_host="${VUB_FORCE_PROXY_HOST:-${PROXY_HOST:-}}"
   if [[ -n "$configured_host" ]]; then
     info "验证指定代理 ${configured_host}:${PROXY_PORT} ..." >&2
-    proxy_test "$configured_host" "$PROXY_PORT" || die "指定代理不可用：${configured_host}:${PROXY_PORT}"
+    proxy_test "$configured_host" "$PROXY_PORT" || {
+      local probe_status=$?
+      warn "指定代理不可用：${configured_host}:${PROXY_PORT}；退出码=$probe_status"
+      return "$probe_status"
+    }
     printf '%s\n' "$configured_host"
     return 0
   fi
 
-  info "在 $cidr 扫描 TCP $PROXY_PORT ..." >&2
+  info "在 $cidr 扫描 TCP $PROXY_PORT（最多 256 地址；每次 1 秒，失败重试一次，32 并发）..." >&2
   candidates=$(python3 "$SCRIPT_DIR/proxy_scan.py" \
-    --cidr "$cidr" --self-ip "$self_ip" --port "$PROXY_PORT") || die "代理扫描失败。"
+    --cidr "$cidr" --self-ip "$self_ip" --port "$PROXY_PORT") || {
+      local scan_status=$?
+      warn "代理扫描失败，退出码=$scan_status。"
+      return "$scan_status"
+    }
   mapfile -t open_hosts <<<"$candidates"
   local -a verified=()
   for host in "${open_hosts[@]:-}"; do
@@ -117,12 +132,12 @@ choose_verified_proxy() {
   done
 
   case "${#verified[@]}" in
-    0) die "没有找到可用代理；请查看上方 Docker Registry / GitHub 的具体验证错误。" ;;
+    0) die "没有找到可用代理；扫描仅覆盖 $cidr。先确认 VM 地址/路由、宿主监听和防火墙；TCP 候选的失败原因见上方 Docker Registry / GitHub 日志。可用 --proxy-host 显式指定宿主地址。" ;;
     1) printf '%s\n' "${verified[0]}" ;;
     *)
       warn "发现多个可用代理：${verified[*]}"
       if is_true "$VUB_YES"; then
-        die "非交互模式不会替你选择多个代理。"
+        die "非交互模式不会替你选择多个代理。请确认宿主地址后使用 --proxy-host <IPv4>。"
       fi
       init_input_tty
       host="$(read_default "选择代理 IP" "${verified[0]}")"
@@ -319,6 +334,7 @@ apply_proxy() {
   [[ -n "${NETWORK_INTERFACE:-}" ]] || NETWORK_INTERFACE="$(current_interface)"
   local host proxy_url lan_cidr no_proxy_value cpa_host sudoers_tmp systemd_tmp apt_tmp
   local docker_proxy_changed=false docker_proxy_content
+  vub_stage 'proxy/发现并验证代理'
   host="$(choose_verified_proxy)"
   proxy_url="http://${host}:${PROXY_PORT}"
   lan_cidr="$(management_cidrs | paste -sd, -)"
@@ -328,6 +344,7 @@ apply_proxy() {
   [[ -n "$cpa_host" ]] && no_proxy_value+=",${cpa_host}"
 
   info "采用代理：$proxy_url"
+  vub_stage 'proxy/生成和应用代理配置'
   write_proxy_state "$proxy_url" "$no_proxy_value" "$host" "$PROXY_PORT"
 
   {

@@ -3,6 +3,9 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/failure-diagnostics.sh
+source "$PROJECT_DIR/scripts/failure-diagnostics.sh"
+vub_stage 'refresh-network 启动/加载公共库'
 # shellcheck source=scripts/00-lib.sh
 source "$PROJECT_DIR/scripts/00-lib.sh"
 
@@ -30,6 +33,7 @@ EOF
 }
 
 ORIGINAL_ARGS=("$@")
+vub_stage '解析参数'
 RENEW=false
 SELECTED_INTERFACE=""
 CONNECTION_UUID=""
@@ -56,13 +60,19 @@ done
 
 [[ "$(uname -s)" == Linux ]] || die "请在 Ubuntu Linux 中运行。"
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  exec sudo --preserve-env=SSH_CONNECTION,SSH_CLIENT,SSH_TTY bash "$0" "${ORIGINAL_ARGS[@]}"
+  vub_stage 'sudo 提权并运行刷新'
+  sudo --preserve-env=SSH_CONNECTION,SSH_CLIENT,SSH_TTY bash "$0" "${ORIGINAL_ARGS[@]}"
+  exit 0
 fi
+vub_stage '检查运行依赖'
 require_root
 require_command python3
 require_command ip
+vub_stage '读取配置'
 load_config true
+vub_stage '识别目标用户'
 resolve_real_user
+vub_stage '校验参数与备份状态'
 [[ ! -e "$VUB_STATE_DIR/active-backup" ]] \
   || die "有未完成的配置备份：$VUB_STATE_DIR/active-backup；请先按 docs/recovery.md 完成恢复。"
 validate_port SSH_PORT
@@ -80,6 +90,7 @@ fi
 PROXY_PORT="${SELECTED_PROXY_PORT:-$PROXY_PORT}"
 validate_port PROXY_PORT
 NETWORK_INTERFACE="${SELECTED_INTERFACE:-$NETWORK_INTERFACE}"
+vub_stage '选择管理网卡'
 NETWORK_INTERFACE=$(current_interface) \
   || die "无法确定管理网卡；用 ip -br link 查看后加 --interface <网卡>。"
 
@@ -96,6 +107,7 @@ in_ssh_session() {
 }
 
 if is_true "$RENEW"; then
+  vub_stage '检查 DHCP 重连条件'
   in_ssh_session && die "--renew 会断开网卡，请在 VMware 的 Ubuntu 本地终端执行。"
   require_command nmcli
   [[ "$(LC_ALL=C nmcli -g GENERAL.TYPE device show "$NETWORK_INTERFACE")" == ethernet ]] \
@@ -140,6 +152,7 @@ if is_true "$RENEW"; then
   fi
 fi
 
+vub_stage '读取当前 IPv4 和路由'
 CURRENT_CIDR=$(current_ipv4_cidr "$NETWORK_INTERFACE")
 CURRENT_GATEWAY=$(current_gateway "$NETWORK_INTERFACE")
 [[ -n "$CURRENT_CIDR" && -n "$CURRENT_GATEWAY" ]] \
@@ -151,15 +164,18 @@ export VUB_YES=true
 export VUB_REFRESH_INTERFACE="$NETWORK_INTERFACE" VUB_FORCE_PROXY_HOST="$SELECTED_PROXY_HOST"
 export VUB_REFRESH_PROXY_PORT="$PROXY_PORT"
 # Do not install dependencies through a possibly stale proxy during recovery.
+vub_stage '执行代理刷新子脚本'
 bash "$PROJECT_DIR/bootstrap.sh" --phase proxy-refresh --config "$VUB_CONFIG_FILE"
 
 # A proxy resolves remote hostnames itself and can mask broken host DNS routing.
 # Do not remove another VPN's DNS policy automatically to make this check pass.
 if ! is_dry_run; then
+  vub_stage '独立验证系统 DNS'
   python3 "$PROJECT_DIR/scripts/network_health.py" --interface "$NETWORK_INTERFACE"
 fi
 
 # Refresh only the LAN SSH allowance; do not reinstall SSH or change its keys/settings.
+vub_stage '检查当前 LAN 的 SSH 放行规则'
 if command -v ufw >/dev/null 2>&1 && LC_ALL=C ufw status | grep -q '^Status: active'; then
   CONFIGURE_STATIC_NETWORK=false
   LAN_CIDRS=$(management_cidrs)

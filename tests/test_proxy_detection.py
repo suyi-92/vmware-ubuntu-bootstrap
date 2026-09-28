@@ -4,6 +4,7 @@ import pathlib
 import socket
 import sys
 import unittest
+from unittest.mock import patch
 
 SCRIPTS = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -32,6 +33,27 @@ class ProxyScanTests(unittest.TestCase):
             listener.listen(1)
             port = listener.getsockname()[1]
             self.assertTrue(proxy_scan.tcp_open("127.0.0.1", port, timeout=0.5))
+
+    def test_scan_retries_failed_hosts_only_and_keeps_all_candidates(self):
+        calls = []
+        def probe(host, port, timeout):
+            calls.append(host)
+            return host == "192.0.2.1" or calls.count(host) == 2
+        with patch.object(proxy_scan, "tcp_open", side_effect=probe):
+            self.assertEqual(proxy_scan.scan_hosts(["192.0.2.1", "192.0.2.2"], 7890, workers=1),
+                             ["192.0.2.1", "192.0.2.2"])
+        self.assertEqual(calls, ["192.0.2.1", "192.0.2.2", "192.0.2.2"])
+
+    def test_scan_limits_and_closed_hosts(self):
+        for options in ({"timeout": 0}, {"timeout": float("nan")}, {"timeout": 6},
+                        {"workers": 0}, {"workers": 65}, {"attempts": 0}, {"attempts": 4}):
+            with self.subTest(options=options), self.assertRaises(ValueError):
+                proxy_scan.scan_hosts(["192.0.2.1"], 7890, **options)
+        with self.assertRaises(ValueError):
+            proxy_scan.scan_hosts(["192.0.2.1"] * 257, 7890)
+        with patch.object(proxy_scan, "tcp_open", return_value=False) as probe:
+            self.assertEqual(proxy_scan.scan_hosts(["192.0.2.1"], 7890), [])
+            self.assertEqual(probe.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ _vub_log() {
   local line
   line="[$(_vub_timestamp)] [$level] $*"
   printf '%s\n' "$line"
-  if [[ -n "$VUB_LOG_FILE" && -d "$(dirname "$VUB_LOG_FILE")" ]]; then
+  if ! is_dry_run && [[ -n "$VUB_LOG_FILE" && -d "$(dirname "$VUB_LOG_FILE")" ]]; then
     printf '%s\n' "$line" >>"$VUB_LOG_FILE" 2>/dev/null || true
   fi
 }
@@ -82,6 +82,9 @@ die() {
   printf '%b' "$VUB_RED" >&2
   _vub_log ERROR "$*" >&2
   printf '%b' "$VUB_RESET" >&2
+  if declare -F vub_failure >/dev/null; then
+    vub_failure 1 "${BASH_SOURCE[1]}" "${BASH_LINENO[0]}"
+  fi
   exit 1
 }
 

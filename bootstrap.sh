@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/failure-diagnostics.sh
+source "$PROJECT_DIR/scripts/failure-diagnostics.sh"
+vub_stage 'bootstrap 启动/加载公共库'
 # shellcheck source=scripts/00-lib.sh
 source "$PROJECT_DIR/scripts/00-lib.sh"
 
@@ -158,9 +161,15 @@ case "$PHASE" in
     fi
     ;;
   proxy-refresh|proxy-status|proxy-off|validate|status|rollback)
-    if ! run_one_phase "$PHASE"; then
-      handle_phase_failure "$PHASE"
-      exit 1
+    vub_stage "bootstrap/$PHASE"
+    if run_one_phase "$PHASE"; then
+      :
+    else
+      phase_status=$?
+      warn "阶段 $PHASE 原始退出码：$phase_status"
+      # Rollback/diagnostics must not replace the original child status.
+      handle_phase_failure "$PHASE" || true
+      vub_failure "$phase_status" "${BASH_SOURCE[0]}" "$LINENO"
     fi
     ;;
   *) die "未知阶段：$PHASE" ;;

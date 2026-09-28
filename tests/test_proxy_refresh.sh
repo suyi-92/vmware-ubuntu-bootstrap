@@ -127,7 +127,7 @@ with tempfile.TemporaryDirectory(prefix='vub-proxy-refresh-') as temporary:
     commands = root / 'bin'
     scripts.mkdir()
     commands.mkdir()
-    for filename in ('02-proxy.sh', 'network-lib.sh', 'network_config.py', 'desktop-proxy.sh'):
+    for filename in ('02-proxy.sh', 'network-lib.sh', 'network_config.py', 'desktop-proxy.sh', 'failure-diagnostics.sh'):
         shutil.copyfile(project / 'scripts' / filename, scripts / filename)
     (scripts / '00-lib.sh').write_text(library)
     (scripts / 'proxy_scan.py').write_text(scanner_mock)
@@ -169,6 +169,11 @@ CPA_BASE_URL=
         output = result.stdout + result.stderr
         assert (result.returncode == 0) == success, (name, result.returncode, output)
         assert message in output, (name, output)
+        if overrides.get('TEST_SCAN_EXIT'):
+            assert result.returncode == int(overrides['TEST_SCAN_EXIT']), (name, output)
+            assert '失败阶段=proxy/发现并验证代理' in output, output
+        if name == 'explicit-proxy-timeout':
+            assert result.returncode == 28, output
         state = capture / 'test-vub__etc__proxy.env'
         assert state.exists() == success, (name, 'unexpected proxy persistence', output)
         assert config.read_bytes() == original_config, 'source config changed'
@@ -235,6 +240,12 @@ CPA_BASE_URL=
     assert len(calls) == 2, calls
 
     capture, calls = run_case(
+        'explicit-proxy-timeout', success=False, message='退出码=28',
+        VUB_FORCE_PROXY_HOST='10.20.30.7',
+        TEST_CURL_PLAN=json.dumps({'registry': [['000', 28, 'TCP timeout']]}))
+    assert len(calls) == 2, calls
+
+    capture, calls = run_case(
         'certificate-error', success=False, message='curl=60',
         TEST_CURL_PLAN=json.dumps({'registry': [['000', 60, 'certificate verify failed']]}))
     assert len(calls) == 1, calls
@@ -254,5 +265,5 @@ CPA_BASE_URL=
         TEST_CURL_PLAN=json.dumps({'registry': [['401', 18, 'partial transfer']]}))
     assert len(calls) == 2, calls
 
-print('proxy refresh: PASS (13 isolated cases; no real network/system changes)')
+print('proxy refresh: PASS (14 isolated cases; no real network/system changes)')
 PY
